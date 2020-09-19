@@ -1,7 +1,10 @@
 # functions for contagious spread through connected habitat & contagious spread
 # while tracking niche
-# note: niche-tracking through time doesn't depend on the contagious spread function
-# 
+# notes: 
+#   - niche-tracking through time doesn't depend on the contagious spread function
+#   - the order is take range[t], do all movement into cells that are accessible 
+#   in the t:t+1 interval, and *then* remove cells that have dropped out of the 
+#   lower range edge 
 
 sim_new_range_igraph <- function(n_iter, ele_vec, lwr_vec, upr_vec, permitted_cells, 
                                     start_cells, n_row, n_col, rule=1) {
@@ -46,10 +49,10 @@ sim_new_range_igraph <- function(n_iter, ele_vec, lwr_vec, upr_vec, permitted_ce
         # recalculate membership
         members_t <- components(graph_t)$membership %>%
             data.frame(membership = ., id_cell = as.integer(names(.)))
-        # recalculate isolated cells
+        # get cell ids for all cells not isolated to starting range[t]
         linked_t <- members_t$id_cell[members_t$membership %in% 
                                           members_t$membership[members_t$id_cell %in% start_t]]
-        # update range and store
+        # update range and store (dropping cells that are no longer in range)
         start_t <- linked_t[ele_vec[linked_t] > lwr_vec[t+1]]
         catch[[t]] <- start_t
     }
@@ -64,7 +67,6 @@ spread_igraph <- function(permitted_vec, start_cells, n_row, n_col, rule=1) {
                       x2 = get_adjacent(permitted_cells, n_row, n_col, rule)) %>%
         filter(x2 %in% permitted_cells)
     graph <- graph_from_data_frame(dat)
-    graph.data.frame(dat)
     members <- components(graph)$membership %>%
         data.frame(membership = ., id_cell = as.integer(names(.)))
     members$id_cell[members$membership %in% members$membership[members$id_cell %in% start_cells]]
