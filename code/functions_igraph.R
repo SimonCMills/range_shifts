@@ -1,23 +1,14 @@
 # functions for contagious spread through connected habitat & contagious spread
 # while tracking niche
-# note: functions don't depend on each other (have retained the former in case 
-# it ends up being useful, but probably won't need it now)
+# note: niche-tracking through time doesn't depend on the contagious spread function
+# 
 
-sim_new_range_igraph_v3 <- function(n_iter, ele_vec, lwr_vec, upr_vec, permitted_cells, 
-                                    start_cells, n_row, n_col) {
+sim_new_range_igraph <- function(n_iter, ele_vec, lwr_vec, upr_vec, permitted_cells, 
+                                    start_cells, n_row, n_col, rule=1) {
     ## part 1: get full graph of all cells that are connected to starting range
     ## by habitat- any cell that is not connected by habitat is never accessible
-    # to add: functionality that allows gap-crossing 
-    # - just a question of expanding the initial dat to include dist=2 and 3
-    dat <- data.frame(x1 = rep(permitted_cells, 8), 
-                      x2 = c(permitted_cells-n_row - 1, 
-                             permitted_cells-n_row, 
-                             permitted_cells-n_row+1, 
-                             permitted_cells-1, 
-                             permitted_cells+1, 
-                             permitted_cells+n_row-1, 
-                             permitted_cells+n_row, 
-                             permitted_cells+n_row+1)) %>%
+    dat <- data.frame(x1 = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
+                      x2 = get_adjacent(permitted_cells, n_row, n_col, rule)) %>%
         filter(x2 %in% permitted_cells)
     graph <- graph_from_data_frame(dat)
     
@@ -65,18 +56,12 @@ sim_new_range_igraph_v3 <- function(n_iter, ele_vec, lwr_vec, upr_vec, permitted
     return(catch)
 } 
 
-# contagious spread
-spread_igraph2 <- function(permitted_vec, start_cells) {
+# contagious spread: not called in main function, but isolates the mechanism for 
+# movement in a single time-slice 
+spread_igraph <- function(permitted_vec, start_cells, n_row, n_col, rule=1) {
     # permitted_cells <- which(permitted_vec == 1)
-    dat <- data.frame(x1 = rep(permitted_cells, 8), 
-                      x2 = c(permitted_cells-n_row - 1, 
-                             permitted_cells-n_row, 
-                             permitted_cells-n_row+1, 
-                             permitted_cells-1, 
-                             permitted_cells+1, 
-                             permitted_cells+n_row-1, 
-                             permitted_cells+n_row, 
-                             permitted_cells+n_row+1)) %>%
+    dat <- data.frame(x1 = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
+                      x2 = get_adjacent(permitted_cells, n_row, n_col, rule)) %>%
         filter(x2 %in% permitted_cells)
     graph <- graph_from_data_frame(dat)
     graph.data.frame(dat)
@@ -84,4 +69,265 @@ spread_igraph2 <- function(permitted_vec, start_cells) {
         data.frame(membership = ., id_cell = as.integer(names(.)))
     members$id_cell[members$membership %in% members$membership[members$id_cell %in% start_cells]]
 }
+
+# for each cell, get all adjacent cells
+# this is a bit unwieldy, but works and is fast
+get_adjacent <- function(cells, n_row, n_col, rule=1) {
+    if (rule == 1) {
+        adjacencies_i <- c(cells-n_row - 1, 
+                           cells-n_row, 
+                           cells-n_row+1, 
+                           cells-1, 
+                           cells+1, 
+                           cells+n_row-1, 
+                           cells+n_row, 
+                           cells+n_row+1)
+        return(adjacencies_i)
+    }
+    if(rule ==2) {
+        adjacencies_i <- c(cells-n_row - 1, 
+                           cells-n_row, 
+                           cells-n_row+1, 
+                           cells-1, 
+                           cells+1, 
+                           cells+n_row-1, 
+                           cells+n_row, 
+                           cells+n_row+1,
+                           cells - 2*n_row - 2, 
+                           cells - 2*n_row - 1, 
+                           cells - 2*n_row, 
+                           cells - 2*n_row + 1,
+                           cells - 2*n_row + 2, 
+                           cells - n_row - 2, 
+                           cells - n_row + 2, 
+                           cells - 2, 
+                           cells + 2, 
+                           cells + n_row - 2, 
+                           cells + n_row + 2,
+                           cells + 2*n_row - 2, 
+                           cells + 2*n_row - 1, 
+                           cells + 2*n_row, 
+                           cells + 2*n_row + 1,
+                           cells + 2*n_row + 2)
+        return(adjacencies_i)
+    }
+    if(rule == 3) {
+        adjacencies_i <- c(cells-n_row - 1, 
+                           cells-n_row, 
+                           cells-n_row+1, 
+                           cells-1, 
+                           cells+1, 
+                           cells+n_row-1, 
+                           cells+n_row, 
+                           cells+n_row+1,
+                           cells - 2*n_row - 2, 
+                           cells - 2*n_row - 1, 
+                           cells - 2*n_row, 
+                           cells - 2*n_row + 1,
+                           cells - 2*n_row + 2, 
+                           cells - n_row - 2, 
+                           cells - n_row + 2, 
+                           cells - 2, 
+                           cells + 2, 
+                           cells + n_row - 2, 
+                           cells + n_row + 2,
+                           cells + 2*n_row - 2, 
+                           cells + 2*n_row - 1, 
+                           cells + 2*n_row, 
+                           cells + 2*n_row + 1,
+                           cells + 2*n_row + 2,
+                           cells - 3*n_row - 3, 
+                           cells - 3*n_row - 2, 
+                           cells - 3*n_row - 1, 
+                           cells - 3*n_row, 
+                           cells - 3*n_row + 1,
+                           cells - 3*n_row + 2, 
+                           cells - 3*n_row + 3, 
+                           cells - 2*n_row - 3,
+                           cells - 2*n_row + 3, 
+                           cells - n_row - 3, 
+                           cells - n_row + 3, 
+                           cells - 3, 
+                           cells + 3, 
+                           cells + n_row - 3, 
+                           cells + n_row + 3,
+                           cells + 2*n_row - 3, 
+                           cells + 2*n_row + 3,
+                           cells + 3*n_row - 3, 
+                           cells + 3*n_row - 2, 
+                           cells + 3*n_row - 1, 
+                           cells + 3*n_row, 
+                           cells + 3*n_row + 1,
+                           cells + 3*n_row + 2, 
+                           cells + 3*n_row + 3)
+        return(adjacencies_i)
+    }
+}
+
+## DEFUNCT ----
+# for each cell, get all adjacent cells
+# get_adjacent <- function(start_cells, n_row, n_col, rule=1) {
+#     # if (rule == 1) {
+#     adjacencies_i <- c(start_cells-n_row - 1, 
+#                        start_cells-n_row, 
+#                        start_cells-n_row+1, 
+#                        start_cells-1, 
+#                        start_cells+1, 
+#                        start_cells+n_row-1, 
+#                        start_cells+n_row, 
+#                        start_cells+n_row+1)
+#     # return(adjacencies_i)
+#     # }
+#     if(rule %in% c(2,3)) {
+#         adjacencies_i <- c(adjacencies_i, 
+#                            c(start_cells - 2*n_row - 2, 
+#                              start_cells - 2*n_row - 1, 
+#                              start_cells - 2*n_row, 
+#                              start_cells - 2*n_row + 1,
+#                              start_cells - 2*n_row + 2, 
+#                              start_cells - n_row - 2, 
+#                              start_cells - n_row + 2, 
+#                              start_cells - 2, 
+#                              start_cells + 2, 
+#                              start_cells + n_row - 2, 
+#                              start_cells + n_row + 2,
+#                              start_cells + 2*n_row - 2, 
+#                              start_cells + 2*n_row - 1, 
+#                              start_cells + 2*n_row, 
+#                              start_cells + 2*n_row + 1,
+#                              start_cells + 2*n_row + 2))
+#     }
+#     if(rule == 3) {
+#         adjacencies_i <- c(adjacencies_i, 
+#                            c(start_cells - 3*n_row - 3, 
+#                              start_cells - 3*n_row - 2, 
+#                              start_cells - 3*n_row - 1, 
+#                              start_cells - 3*n_row, 
+#                              start_cells - 3*n_row + 1,
+#                              start_cells - 3*n_row + 2, 
+#                              start_cells - 3*n_row + 3, 
+#                              start_cells - 2*n_row - 3,
+#                              start_cells - 2*n_row + 3, 
+#                              start_cells - n_row - 3, 
+#                              start_cells - n_row + 3, 
+#                              start_cells - 3, 
+#                              start_cells + 3, 
+#                              start_cells + n_row - 3, 
+#                              start_cells + n_row + 3,
+#                              start_cells + 2*n_row - 3, 
+#                              start_cells + 2*n_row + 3,
+#                              start_cells + 3*n_row - 3, 
+#                              start_cells + 3*n_row - 2, 
+#                              start_cells + 3*n_row - 1, 
+#                              start_cells + 3*n_row, 
+#                              start_cells + 3*n_row + 1,
+#                              start_cells + 3*n_row + 2, 
+#                              start_cells + 3*n_row + 3))
+#     }
+#     adjacencies_i
+# }
+# 
+# 
+# sim_new_range <- function(n_iter, ele_vec, lwr_vec, upr_vec, permitted_vec, 
+#                           range_init, n_row, n_col, rule=1) {
+#     # catch ids of range[t]
+#     range_catch <- as.list(rep(NA, n_iter))
+#     # initialise range 
+#     range_t <- range_init
+#     
+#     for(t in 1:n_iter) {
+#         # in elevational range and in permitted cell (i.e. habitat)
+#         permitted_in_range <- as.numeric(ele_vec > lwr_vec[t] & 
+#                                              ele_vec <= upr_vec[t+1] & 
+#                                              permitted_vec ==1) 
+#         # get range t1 (prior to removing lost range)
+#         range_t1 <- spread(permitted_in_range, range_t, n_row, n_col, rule = 1)
+#         # remove cells that have dropped out
+#         to_drop <- which(df_gradient$xy < lwr_vec[t+1])
+#         range_t1 <- range_t1[!(range_t1 %in% to_drop)]
+#         # store range id and update for next iteration
+#         range_catch[[t]] <- range_t1
+#         range_t <- range_t1
+#     }
+#     return(range_catch)
+# }
+#
+#
+# spread function
+# spread <- function(permitted_vec, start_cells, n_row, n_col, rule) {
+#     # initial conditions
+#     old_cells <- start_cells
+#     adjacent_permitted <- 1
+#     
+#     while(length(adjacent_permitted) != 0) {
+#         # for each cell, get all adjacent cells
+#         adjacencies_i <- c(start_cells-n_row - 1, 
+#                            start_cells-n_row, 
+#                            start_cells-n_row+1, 
+#                            start_cells-1, 
+#                            start_cells+1, 
+#                            start_cells+n_row-1, 
+#                            start_cells+n_row, 
+#                            start_cells+n_row+1)
+#         if(rule %in% c(2,3)) {
+#             adjacencies_i <- c(adjacencies_i, 
+#                                c(start_cells - 2*n_row - 2, 
+#                                  start_cells - 2*n_row - 1, 
+#                                  start_cells - 2*n_row, 
+#                                  start_cells - 2*n_row + 1,
+#                                  start_cells - 2*n_row + 2, 
+#                                  start_cells - n_row - 2, 
+#                                  start_cells - n_row + 2, 
+#                                  start_cells - 2, 
+#                                  start_cells + 2, 
+#                                  start_cells + n_row - 2, 
+#                                  start_cells + n_row + 2,
+#                                  start_cells + 2*n_row - 2, 
+#                                  start_cells + 2*n_row - 1, 
+#                                  start_cells + 2*n_row, 
+#                                  start_cells + 2*n_row + 1,
+#                                  start_cells + 2*n_row + 2))
+#         }
+#         if(rule == 3) {
+#             adjacencies_i <- c(adjacencies_i, 
+#                                c(start_cells - 3*n_row - 3, 
+#                                  start_cells - 3*n_row - 2, 
+#                                  start_cells - 3*n_row - 1, 
+#                                  start_cells - 3*n_row, 
+#                                  start_cells - 3*n_row + 1,
+#                                  start_cells - 3*n_row + 2, 
+#                                  start_cells - 3*n_row + 3, 
+#                                  start_cells - 2*n_row - 3,
+#                                  start_cells - 2*n_row + 3, 
+#                                  start_cells - n_row - 3, 
+#                                  start_cells - n_row + 3, 
+#                                  start_cells - 3, 
+#                                  start_cells + 3, 
+#                                  start_cells + n_row - 3, 
+#                                  start_cells + n_row + 3,
+#                                  start_cells + 2*n_row - 3, 
+#                                  start_cells + 2*n_row + 3,
+#                                  start_cells + 3*n_row - 3, 
+#                                  start_cells + 3*n_row - 2, 
+#                                  start_cells + 3*n_row - 1, 
+#                                  start_cells + 3*n_row, 
+#                                  start_cells + 3*n_row + 1,
+#                                  start_cells + 3*n_row + 2, 
+#                                  start_cells + 3*n_row + 3))
+#         }
+#         # drop adjacencies that are start cells or outside the matrix
+#         adjacency_unique <- unique(adjacencies_i)
+#         adjacency_clean <- adjacency_unique[!(adjacency_unique %in% old_cells) & 
+#                                                 !(adjacency_unique < 1) & 
+#                                                 !(adjacency_unique > n_row*n_col)]
+#         # drop non-start-cell adjacencies that aren't permitted
+#         adjacent_permitted <- adjacency_clean[permitted_vec[adjacency_clean] == 1]
+#         # update start_cells with new starts
+#         start_cells <- adjacent_permitted
+#         # update 'seen' cells to exclude in future
+#         old_cells <- c(old_cells, adjacent_permitted)
+#     }
+#     return(old_cells)
+# }
+
 
