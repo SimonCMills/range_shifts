@@ -5,6 +5,48 @@
 #   - the order is take range[t], do all movement into cells that are accessible 
 #   in the t:t+1 interval, and *then* remove cells that have dropped out of the 
 #   lower range edge 
+plot_mat <- function(x, ...) plot(raster(x), ...)
+
+# this function has been so *incredibly* headache inducing, but sorted now
+get_max_ele <- function(ele_vec, permitted_cells, n_row, n_col, rule=2) {
+  # generate adjacencies, then remove adjacencies that aren't permitted
+  dat <- data.table(from = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
+                    to = get_adjacent(permitted_cells, n_row, n_col, rule)) %>%
+    .[to %in% permitted_cells] 
+
+  # get elevations for from and to vertices
+  dat[,c("from_ele", "to_ele") := list(ele_vec[from], ele_vec[to])]
+  
+  # if adjacent nodes don't have same elevation, drop the lower elevation 
+  # retention index; if they are the same elevation retain both (as path needs
+  # to be bidirectional)
+  dat2 <- rbind(dat[from_ele > to_ele,], dat[from_ele == to_ele,])
+  # order to create necessary ordering for dfs (expand on this..)
+  setorder(dat2, -from_ele, -to_ele)
+  
+  # generate graph from adjacencies
+  g <- graph_from_data_frame(dat2, directed = T)
+  
+  # generate lookup table
+  graph_vertices <- V(g)$name %>%
+    data.table(id_cell = as.integer(.), id_vertex = 1:length(.), 
+               max_ele=as.double(rep(NA, length(.)))) 
+  graph_vertices[,ele := ele_vec[id_cell]]
+  
+  # run dfs
+  dfs_out <- dfs(g, root = 1, unreachable = T, neimode="out", dist=T)
+
+  # add distances to df with original ordering
+  graph_vertices[,dist := dfs_out$dist]
+  # now generate ordering for doing the membership calculation
+  graph_vertices[as.numeric(dfs_out$order), ordering := 1:.N]
+  setorder(graph_vertices, ordering)
+  # get membership and get maximum accessible elevation under upslope movement
+  graph_vertices[,membership := cumsum(dist==0)]
+  graph_vertices[,max_ele := max(ele), by="membership"]
+  
+  return(graph_vertices[])
+}
 
 sim_new_range_igraph <- function(n_iter, ele_vec, lwr_vec, upr_vec, permitted_cells, 
                                     start_cells, n_row, n_col, rule=1) {
@@ -164,6 +206,17 @@ get_adjacent <- function(cells, n_row, n_col, rule=1) {
                            cells + 3*n_row + 3)
         return(adjacencies_i)
     }
+}
+
+# get matrix margins
+get_margins <- function(matrix) {
+    dims <- dim(matrix)
+    bottom_right <- prod(dims)
+    top_right <- (bottom_right - dims[1])
+    c(1:dims[1], # first column 
+      top_right:bottom_right, # last column
+      seq(1, top_right, dims[1]), # top row
+      seq(dims[1], bottom_right, dims[1])) # bottom row
 }
 
 ## DEFUNCT ----
