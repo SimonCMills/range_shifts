@@ -1,15 +1,86 @@
-# functions for contagious spread through connected habitat & contagious spread
-# while tracking niche
-# notes: 
-#   - niche-tracking through time doesn't depend on the contagious spread function
-#   - the order is take range[t], do all movement into cells that are accessible 
-#   in the t:t+1 interval, and *then* remove cells that have dropped out of the 
-#   lower range edge 
-plot_mat <- function(x, ...) plot(raster(x), ...)
+# Growing set of functions for modelling spread through a network (built on igraph)
+# Needs consolidation, and finalising of testing (though so far everything seems
+# to be performing as expected). 
+# Currently: 
+# (1) generate_graph: create network from permitted cells, elevations, and movement
+# rule. 
+#   TO DO: think the most efficient way forward is to have a single graph 
+#   generated and saved once, and then anything subsequent to simply refer to this
+#   Currently most functions will rebuild graph each time. 
+#
+# (2) get_range: from graph, get all accessible cells and append their elevations. 
+# Will be used to estimate the #cells in range through time
+#
+# (3) get_max_ele:get the maximum elevation accessible from all cells
+#
+# - a bunch of possibly redundant stuff. 
+#
+# (4) get_adjacent: get adjacencies under varying gap-crossing rules- currently
+# written manually from 0-2 cell gap-crossing; possibly needs to be able to 
+# generate adjacencies for an arbitrarily large gap-crossing number. 
+# 
+#
+# (5) get_margins: creates impassable border at edge of raster (to prevent 
+# adjacencies wrapping around to other side of matrix)
 
-# this function has been so *incredibly* headache inducing, but sorted now
-get_max_ele <- function(ele_vec, permitted_cells, n_row, n_col, rule=2) {
+# dependencies
+library(dplyr); library(data.table); library(igraph)
+
+# generate the graph of all cells (travelling up- or along-slope, i.e from smaller
+# values to larger) 
+generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule=1) {
+  
   # generate adjacencies, then remove adjacencies that aren't permitted
+  dat <- data.table(from = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
+                    to = get_adjacent(permitted_cells, n_row, n_col, rule)) %>%
+    .[to %in% permitted_cells] 
+  
+  # get elevations for from and to vertices
+  dat[,c("from_ele", "to_ele") := list(ele_vec[from], ele_vec[to])]
+  
+  # if adjacent nodes don't have same elevation, drop the lower elevation 
+  # retention index; if they are the same elevation retain both (as path needs
+  # to be bidirectional)
+  dat2 <- rbind(dat[from_ele > to_ele,], dat[from_ele == to_ele,])
+  
+  # NOTE: don't particularly need ordering here, but have retained anyway
+  # order to create necessary ordering for dfs: dfs algorithm will jump to 
+  # new roots in order of vertices: by giving edge df in order of elevation, 
+  # this ensures it will always start from the next highest unreached vertex. 
+  setorder(dat2, -from_ele, -to_ele)
+  
+  # generate graph from adjacencies
+  g <- graph_from_data_frame(dat2, directed = T)
+  
+  return(g)
+}
+
+# given the graph, associated vector of elevations, and cells in range at outset
+# calculate all accessible future cells (and append associated elevations)
+get_range <- function(graph, ele_vec, start_cells) {
+  
+  # generate lookup table
+  graph_vertices <- V(graph)$name %>%
+    data.table(id_cell = as.integer(.), id_vertex = 1:length(.)) 
+  graph_vertices[,ele := ele_vec[id_cell]]
+  
+  start_vertices <- graph_vertices[id_cell %in% start_cells, id_vertex]
+  
+  # run dfs
+  # housekeeping: fix igraph behaviour to correctly store father vertices
+  igraph_options(add.vertex.names=F)
+  bfs_out <- bfs(graph, root = start_vertices, unreachable = F, neimode="in")
+  
+  # now generate ordering for doing the membership calculation: NAs aren't reachable
+  graph_vertices[as.numeric(bfs_out$order), ordering := 1:.N]
+  setorder(graph_vertices, ordering)
+  
+  return(graph_vertices[!is.na(ordering)])
+}
+
+# get maximum elevation accessible from each cell
+get_max_ele <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
+    # generate adjacencies, then remove adjacencies that aren't permitted
   dat <- data.table(from = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
                     to = get_adjacent(permitted_cells, n_row, n_col, rule)) %>%
     .[to %in% permitted_cells] 
@@ -21,7 +92,9 @@ get_max_ele <- function(ele_vec, permitted_cells, n_row, n_col, rule=2) {
   # retention index; if they are the same elevation retain both (as path needs
   # to be bidirectional)
   dat2 <- rbind(dat[from_ele > to_ele,], dat[from_ele == to_ele,])
-  # order to create necessary ordering for dfs (expand on this..)
+  # order to create necessary ordering for dfs: dfs algorithm will jump to 
+  # new roots in order of vertices: by giving edge df in order of elevation, 
+  # this ensures it will always start from the next highest unreached vertex
   setorder(dat2, -from_ele, -to_ele)
   
   # generate graph from adjacencies
@@ -34,22 +107,24 @@ get_max_ele <- function(ele_vec, permitted_cells, n_row, n_col, rule=2) {
   graph_vertices[,ele := ele_vec[id_cell]]
   
   # run dfs
-  dfs_out <- dfs(g, root = 1, unreachable = T, neimode="out", dist=T)
+  # housekeeping: fix igraph behaviour to correctly store father vertices
+  igraph_options(add.vertex.names=F)
+  dfs_out <- dfs(g, root = 1, unreachable = T, neimode="out", dist=T, father=T)
 
   # add distances to df with original ordering
-  graph_vertices[,dist := dfs_out$dist]
+  graph_vertices[,father := dfs_out$father]
   # now generate ordering for doing the membership calculation
   graph_vertices[as.numeric(dfs_out$order), ordering := 1:.N]
   setorder(graph_vertices, ordering)
   # get membership and get maximum accessible elevation under upslope movement
-  graph_vertices[,membership := cumsum(dist==0)]
+  graph_vertices[,membership := cumsum(is.na(father))]
   graph_vertices[,max_ele := max(ele), by="membership"]
   
   return(graph_vertices[])
 }
 
 sim_new_range_igraph <- function(n_iter, ele_vec, lwr_vec, upr_vec, permitted_cells, 
-                                    start_cells, n_row, n_col, rule=1) {
+                                    start_cells, n_row, n_col, rule) {
     ## part 1: get full graph of all cells that are connected to starting range
     ## by habitat- any cell that is not connected by habitat is never accessible
     dat <- data.frame(x1 = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
