@@ -4,9 +4,22 @@ author: "Simon Mills"
 date: "13/10/2020"
 output: html_document
 ---
+# Overview
+__Series of tests on simplified matrices to check function behaviour is as expected.__
+
+Movement functions all depend on igraph for constructing network of linked cells and then various approaches to quantifying  movement through these. Broad building blocks are:
+
+(1) take a matrix of forest cover and elevation (though could in principle be any matrix of permissible movement and any gradient that you want directional movement along).
+(2) Identify permitted cells within a given search radius (degree of gap-crossing)
+(3) Trim all adjacencies to those that are along or up-slope (along-slope movement will be by definition bidirectional, while upslope is unidirectional)
+(4) Build graph
+(5) With graph in hand, generate statistics of interest 
+
 Notes: 
 
-- The full raster has to have a margin of "not-permitted" (i.e. 0-valued cells), otherwise it will wrap around edges. Is it best to hard-code this? Currently do the matrix processing outside of the function, but maybe safest to either wrap this in a helper function, or stick it in the graph function directly.. 
+- The full raster has to have a margin of "not-permitted" (i.e. 0-valued cells), otherwise it will wrap around edges. Have a function to do this, but currently do the matrix processing outside of the function: may be safest to either wrap this in a helper function, or stick it in the graph function directly.. 
+
+- Method is pretty fast: using Cordillera Oriental de Colombia at 100m resolution, can create graph for 48 million cells in 2.5 minutes, and this appears to be the main time overhead with subsequent functions (i.e. 5) being negligible relative to this (e.g. 10 seconds). Time and memory should (in principle) scale approximately linearly, so plan would be to drop it to 60m resolution and try that. Ultimately think it should go to 30m. 
 
 ```{r setup, include=FALSE}
 library(raster); library(igraph); library(dplyr)
@@ -20,11 +33,11 @@ plot_mat <- function(x, ...) plot(raster(x), ...)
 ```
 
 # Test 1: spread of algorithm under varying gap-crossing
-Note this is just isolating the mechanism of spread through the graph, with varying gap-crossing ability. This spread function however is not called directly in the main functions. 
-```{r, eval=F}
+Note this is just isolating the mechanism of spread through the graph, with varying gap-crossing ability. This spread function is not called directly in the main functions. 
+```{r}
 # read 65*50 matrix that has "permitted movement" cells spaced contiguously, 
 # 1-cell removed, and 2-cell removed
-test_mat <- as.matrix(raster("../data/pikachu.png"))
+test_mat <- as.matrix(raster("../data/test_imgs/pikachu.png"))
 test_mat[test_mat[] == 5] <- 1
 test_mat[test_mat[] > 1] <-0
 
@@ -50,76 +63,13 @@ permitted_plot <- test_mat
 permitted_plot[start_cells] <- 20
 plot_mat(permitted_plot, asp=1, main = "Permitted movement & start")
 plot_mat(mat1, asp=1, main = "Spread, 1-cell search radius")
-plot_matmat2, asp=1, main = "Spread, 2-cell search radius")
+plot_mat(mat2, asp=1, main = "Spread, 2-cell search radius")
 plot_mat(mat3, asp=1, main = "Spread, 3-cell search radius")
 ```
 
-```{r}
-## test 2----
-# Does function correctly track niche through time?
-# create an elevational gradient
-# df_gradient <- expand.grid(x = 1:n_col, y = 1:n_row) %>%
-#     mutate(xy = (x*y), xy_scale = (xy-min(xy))/max(xy-min(xy)) * 1000) %>%
-#     arrange(x, y)
-# 
-# # for passing to simulation
-# ele_vec <- df_gradient$xy_scale
-# start_cells <- min(which(test_mat[] == 1))
-# permitted_cells <- which(permitted_movement == 1)
-# n_iter <- 300
-# lwr_vec <- 0 + 0:(n_iter+1)
-# upr_vec <- 100 + 0:(n_iter+1)
-# 
-# # simulate
-# ranges_sim <- sim_new_range_igraph(n_iter, ele_vec, lwr_vec, upr_vec, 
-#                                    permitted_cells, start_cells, n_row, n_col, rule=2)
-# 
-# # save 
-# png("figures/test_rangesim_rule2.png", height=200, width=110, units="mm", res=100)
-# par(mfrow = c(4,2))
-# plot_mat(matrix(ele_vec, ncol=n_col, nrow=n_row), main="Elevation gradient")
-# mat_2 <- test_mat; mat_2[mat_2 == 1] <- ele_vec[mat_2==1]
-# plot_mat(mat_2, main="Permitted movement & gradient")
-# # plot results
-# mat1 <- test_mat; mat1[ranges_sim[[1]]] <- 20
-# plot_mat(mat1, main="t[1]")
-# mat1 <- test_mat; mat1[ranges_sim[[50]]] <- 20
-# plot_mat(mat1, main="t[50]")
-# mat1 <- test_mat; mat1[ranges_sim[[100]]] <- 20
-# plot_mat(mat1, main="t[100]")
-# mat1 <- test_mat; mat1[ranges_sim[[150]]] <- 20
-# plot_mat(mat1, main="t[150]")
-# mat1 <- test_mat; mat1[ranges_sim[[200]]] <- 20
-# plot_mat(mat1, main="t[200]")
-# mat1 <- test_mat; mat1[ranges_sim[[250]]] <- 20
-# plot_mat(mat1, main="t[250]")
-# dev.off()
-
-# generate gif
-# library(animation)
-# saveHTML({
-#     for(i in seq(1, n_iter, round(n_iter/50, 0))) {
-#         mat_t <- test_mat; mat_t[ranges_sim[[i]]] <- 10
-#         plot_mat(mat_t)
-#     }
-# },title = "Simulated spread, rule=1", description = desc, verbose = FALSE)
-
-## getting connectivity measures
-# permitted_cells <- which(permitted_vec == 1)
-# rule <- 1
-# dat <- data.frame(x1 = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
-#                   x2 = get_adjacent(permitted_cells, n_row, n_col, rule)) %>%
-#     filter(x2 %in% permitted_cells)
-# graph <- graph_from_data_frame(dat)
-# members <- components(graph)$membership %>%
-#     data.frame(membership = ., id_cell = as.integer(names(.)))
-# members$id_cell[members$membership %in% members$membership[members$id_cell %in% start_cells]]
-```
-
-# Test X: get all cells up-gradient from a start cell
+# Test 2: get all cells up-gradient from a start cell
 (i.e. travelling from smaller values to larger, as is the case moving up or along an elevational gradient)
 ```{r}
-## test 5: accessible cells ----
 # get all cells that are accessible up-gradient from a start-cell
 test_mat <- as.matrix(raster("../figures/test_range_shift_1.png"))
 
@@ -158,7 +108,6 @@ plot_mat(mat_tmp, main="Accessed cells")
 
 ## Variant with connection upslope 
 ```{r}
-## test 6: accessible cells ----
 # get all cells that are accessible up-gradient from a start-cell (alternative
 # version with linkage upslope)
 test_mat <- as.matrix(raster("../figures/test_range_shift_2.png"))
@@ -196,7 +145,7 @@ mat_tmp <- test_mat; mat_tmp[ranges[!is.na(ordering), id_cell]] <- 2
 plot_mat(mat_tmp, main="Accessed cells")
 ```
 
-# Test 7: up-gradient movement from multiple start-points
+## Variant with up-gradient movement from multiple start-points
 ```{r}
 test_mat <- as.matrix(raster("../figures/test_range_shift_3.png"))
 
@@ -231,4 +180,66 @@ mat_tmp <- test_mat; mat_tmp[] <- ele_vec
 plot_mat(mat_tmp, main="Gradient")
 mat_tmp <- test_mat; mat_tmp[ranges[!is.na(ordering), id_cell]] <- 2
 plot_mat(mat_tmp, main="Accessed cells")
+```
+
+# Test X (out of action; doesn't run)
+```{r, eval=F}
+# Does function correctly track niche through time?
+# create an elevational gradient
+df_gradient <- expand.grid(x = 1:n_col, y = 1:n_row) %>%
+    mutate(xy = (x*y), xy_scale = (xy-min(xy))/max(xy-min(xy)) * 1000) %>%
+    arrange(x, y)
+
+# for passing to simulation
+ele_vec <- df_gradient$xy_scale
+start_cells <- min(which(test_mat[] == 1))
+permitted_cells <- which(permitted_movement == 1)
+n_iter <- 300
+lwr_vec <- 0 + 0:(n_iter+1)
+upr_vec <- 100 + 0:(n_iter+1)
+
+# simulate
+ranges_sim <- sim_new_range_igraph(n_iter, ele_vec, lwr_vec, upr_vec,
+                                   permitted_cells, start_cells, n_row, n_col, rule=2)
+
+# save
+png("figures/test_rangesim_rule2.png", height=200, width=110, units="mm", res=100)
+par(mfrow = c(4,2))
+plot_mat(matrix(ele_vec, ncol=n_col, nrow=n_row), main="Elevation gradient")
+mat_2 <- test_mat; mat_2[mat_2 == 1] <- ele_vec[mat_2==1]
+plot_mat(mat_2, main="Permitted movement & gradient")
+# plot results
+mat1 <- test_mat; mat1[ranges_sim[[1]]] <- 20
+plot_mat(mat1, main="t[1]")
+mat1 <- test_mat; mat1[ranges_sim[[50]]] <- 20
+plot_mat(mat1, main="t[50]")
+mat1 <- test_mat; mat1[ranges_sim[[100]]] <- 20
+plot_mat(mat1, main="t[100]")
+mat1 <- test_mat; mat1[ranges_sim[[150]]] <- 20
+plot_mat(mat1, main="t[150]")
+mat1 <- test_mat; mat1[ranges_sim[[200]]] <- 20
+plot_mat(mat1, main="t[200]")
+mat1 <- test_mat; mat1[ranges_sim[[250]]] <- 20
+plot_mat(mat1, main="t[250]")
+dev.off()
+
+# generate gif
+# library(animation)
+# saveHTML({
+#     for(i in seq(1, n_iter, round(n_iter/50, 0))) {
+#         mat_t <- test_mat; mat_t[ranges_sim[[i]]] <- 10
+#         plot_mat(mat_t)
+#     }
+# },title = "Simulated spread, rule=1", description = desc, verbose = FALSE)
+
+## getting connectivity measures
+# permitted_cells <- which(permitted_vec == 1)
+# rule <- 1
+# dat <- data.frame(x1 = rep(permitted_cells, (rule*2 + 1)^2 - 1),
+#                   x2 = get_adjacent(permitted_cells, n_row, n_col, rule)) %>%
+#     filter(x2 %in% permitted_cells)
+# graph <- graph_from_data_frame(dat)
+# members <- components(graph)$membership %>%
+#     data.frame(membership = ., id_cell = as.integer(names(.)))
+# members$id_cell[members$membership %in% members$membership[members$id_cell %in% start_cells]]
 ```
