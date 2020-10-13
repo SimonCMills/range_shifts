@@ -18,22 +18,30 @@ mountains <- ee$FeatureCollection("users/scmills/GMBAMountainInventory_v1_2-Worl
 Andes <- mountains$filterBounds(countries_subset);
 
 ## Extract elevations ----
+# Note: try() is to supress below error that occurs at end of export: 
+# Error in py_get_attr_impl(x, name, silent) : 
+# OverflowError: Python int too large to convert to C long
+# The raster is correctly exported
+
 featlist <- Andes$getInfo()["features"]
 
-for (i in 1:length(featlist$features)) {
+for (i in 7:length(featlist$features)) {
     # get single feature from the feature list
     feat_i <- featlist$features[[i]]
     # clip elevation to this single mountain range
     ele_i <- ALOS$clip(ee$Feature(feat_i))
     
     # extract name
-    name_i <-   feat_i$properties$Name
+    name_i <- gsub("�", "",feat_i$properties$Name)
     # export
-    task_i <- ee_image_to_drive(image = ele_i, 
-                      description = paste0(save_prefix, gsub(" ", "_", name_i)), 
-                      folder = "rgee_exports", 
-                      scale = 60)
+    task_i <- try(
+        ee_image_to_drive(image = ele_i, 
+                          description = paste0(save_prefix, gsub(" ", "_", name_i)), 
+                          folder = "rgee_exports", 
+                          scale = 60, maxPixels = 3e8), 
+        silent=F)
+    
     task_i$start()
     cat(paste0("\n\n\n", name_i))
-    ee_monitoring(task_i)
+    ee_monitoring(task_i, quiet = TRUE)
 }
