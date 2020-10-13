@@ -75,7 +75,7 @@ get_range <- function(graph, ele_vec, start_cells) {
   graph_vertices[as.numeric(bfs_out$order), ordering := 1:.N]
   setorder(graph_vertices, ordering)
   
-  return(graph_vertices[!is.na(ordering)])
+  return(graph_vertices[])
 }
 
 # get maximum elevation accessible from each cell
