@@ -1,5 +1,5 @@
 ---
-title: "Unit testing movement functions"
+title: "Description and unit testing movement functions"
 author: "Simon Mills"
 date: "13/10/2020"
 output: html_document
@@ -15,14 +15,34 @@ Movement functions all depend on igraph for constructing network of linked cells
 (4) Build graph
 (5) With graph in hand, generate statistics of interest 
 
-Notes: 
+## Important:
+
+- There is a bug in the igraph function that will very (very) infrequently generate duplicate vertices for
+*some* values of xe+05. So far have seen x values of 5, 7, 9, and 10. In all cases observed so far, the xe+05 version only has incoming edges, while the x00000 version only has outgoing edges. The workaround is to identify these failure cases, reroute the incoming edges to the x00000 version (creating a correctly connected vertex in the graph), and then remove the xe+05 vertices.
+
+- It apparently only affects a tiny number of cases (e.g. 4 duplicated nodes in a network of ~2.7e06 vertices), so is going to have an ignorable impact on results, but will apply this fix regardless. For Cordillera Central de Ecuador, 24 vertices are duplicated in this manner (presumably stored as e+06 and 07), again this is a diminishingly small number out of a graph of 28 million vertices. 
+```{r, eval=F}
+[1] 100000000  64000000  73000000  88000000  77000000  65000000 112000000  61000000  49000000  66000000  98000000
+[12]  89000000  38000000 126000000 113000000  80000000  60000000 102000000 103000000  23000000 114000000  59000000
+[23]  90000000  71000000
+```
+
+- I am currently removing duplicates (which will create a false break in the network) and recording the number of duplicate cases. 
+
+- Need to generate a reproducible example and submit as an error.
+
+## Notes: 
 
 - The full raster has to have a margin of "not-permitted" (i.e. 0-valued cells), otherwise it will wrap around edges. Have a function to do this, but currently do the matrix processing outside of the function: may be safest to either wrap this in a helper function, or stick it in the graph function directly.. 
 
-- Method is pretty fast: using Cordillera Oriental de Colombia at 100m resolution, can create graph for 48 million cells in 2.5 minutes, and this appears to be the main time overhead with subsequent functions (i.e. 5) being negligible relative to this (e.g. 10 seconds). Time and memory should (in principle) scale approximately linearly, so plan would be to drop it to 60m resolution and try that. Ultimately think it should go to 30m. 
+- Method is pretty fast: using Cordillera Oriental de Colombia at 100m resolution, can create graph for 48 million cells in 2.5 minutes, using the Cordillera Central de Ecuador at 60m resolution (137 million cells) takes 14.5 minutes. This appears to be the main time overhead with subsequent functions being negligible relative to this, though will run them many times, which can make these latter steps similar in terms of time. 
 
-```{r setup, include=FALSE}
-library(raster); library(igraph); library(dplyr)
+- Memory usage can be substantial: Cordillera Central de Ecuador will run locally (just) but appears to use about 24GB to build the graph (though the final object is only 6GB). Saving this as a binary file (RDS), is slow (~approx 5-10 minutes, but to read is only ~100s)
+
+- Time and memory should scale approximately linearly (and this does indeed appear to be the case). Cordillera Central de Ecuador is a large mountain range, and the results from this therefore suggest that *any* tropical mountain range should be computationally feasable at this spatial resolution. 
+
+```{r setup, message=F}
+library(raster); library(igraph); library(dplyr); library(data.table)
 source("functions_igraph.R")
 
 # rasters index cells horizontally rather than vertically, which will mess up code
@@ -179,6 +199,45 @@ mat_tmp <- test_mat; mat_tmp[ranges[!is.na(ordering), id_cell]] <- 2
 plot_mat(mat_tmp, main="Accessed cells")
 ```
 
+## Variant with connection upslope (swapped gradient)
+```{r}
+# get all cells that are accessible up-gradient from a start-cell (alternative
+# version with linkage upslope)
+test_mat <- as.matrix(raster("../figures/test_range_shift_2.png"))
+
+# get start cell
+in_range <- which(test_mat[] == 237)
+# convert start range and permitted movements to 1
+test_mat[test_mat[] %in% c(0, 237)] <- 1
+# convert not-permitted to 0
+test_mat[test_mat[] == 255] <- 0
+
+# for passing to function
+permitted_cells <- which(test_mat[] == 1)
+n_row <- dim(test_mat)[1]
+n_col <- dim(test_mat)[2]
+
+# generate gradient
+df_gradient <- expand.grid(x = 1:n_col, y = 1:n_row) %>%
+    arrange(x, y) %>%
+    mutate(xy = x) 
+# for passing to simulation
+ele_vec <- df_gradient$xy
+
+# run graph and ranges
+graph <- generate_graph(ele_vec, permitted_cells, n_row, n_col, rule=1)
+ranges <- get_range(graph, ele_vec, start_cells = in_range)
+
+# visualise
+par(mfrow=c(2,2))
+mat_tmp <- test_mat; mat_tmp[in_range] <- 2
+plot_mat(mat_tmp, main="Permissible movement & start-range (green)")
+mat_tmp <- test_mat; mat_tmp[] <- ele_vec
+plot_mat(mat_tmp, main="Gradient")
+mat_tmp <- test_mat; mat_tmp[ranges[!is.na(ordering), id_cell]] <- 2
+plot_mat(mat_tmp, main="Accessed cells")
+```
+
 ## Variant with up-gradient movement from multiple start-points
 ```{r}
 test_mat <- as.matrix(raster("../figures/test_range_shift_3.png"))
@@ -212,8 +271,48 @@ mat_tmp <- test_mat; mat_tmp[in_range] <- 2
 plot_mat(mat_tmp, main="Permissible movement & start-range (green)")
 mat_tmp <- test_mat; mat_tmp[] <- ele_vec
 plot_mat(mat_tmp, main="Gradient")
-mat_tmp <- test_mat; mat_tmp[ranges[!is.na(ordering), id_cell]] <- 2
-plot_mat(mat_tmp, main="Accessed cells")
+mat_tmp <- test_mat; mat_tmp[] <- NA; mat_tmp[ranges[!is.na(ordering), id_cell]] <- 2
+mat_tmp[ranges[start_cell == T, id_cell]] <- 4
+plot_mat(mat_tmp, main="Accessed cells and start-cell")
+```
+
+## Variant with up-gradient movement from multiple start-points (swapped gradient)
+```{r}
+test_mat <- as.matrix(raster("../figures/test_range_shift_3.png"))
+
+# get start cell
+in_range <- which(test_mat[] == 237)
+# convert start range and permitted movements to 1
+test_mat[test_mat[] %in% c(0, 237)] <- 1
+# convert not-permitted to 0
+test_mat[test_mat[] == 255] <- 0
+
+# for passing to function
+permitted_cells <- which(test_mat[] == 1)
+n_row <- dim(test_mat)[1]
+n_col <- dim(test_mat)[2]
+
+# generate gradient
+df_gradient <- expand.grid(x = 1:n_col, y = 1:n_row) %>%
+    arrange(x, y) %>%
+    mutate(xy = x) 
+# for passing to simulation
+ele_vec <- df_gradient$xy
+
+# run graph and ranges
+graph <- generate_graph(ele_vec, permitted_cells, n_row, n_col, rule=1)
+ranges <- get_range(graph, ele_vec, start_cells = in_range)
+
+# visualise
+par(mfrow=c(2,2))
+mat_tmp <- test_mat; mat_tmp[in_range] <- 2
+plot_mat(mat_tmp, main="Permissible movement & start-range (green)")
+mat_tmp <- test_mat; mat_tmp[] <- ele_vec
+plot_mat(mat_tmp, main="Gradient")
+mat_tmp <- test_mat; mat_tmp[] <- NA; mat_tmp[ranges[!is.na(ordering), id_cell]] <- 2
+mat_tmp[ranges[start_cell == T, id_cell]] <- 4
+plot_mat(mat_tmp, main="Accessed cells and start-cell")
+
 ```
 
 # Test X (out of action; eval=F)

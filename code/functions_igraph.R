@@ -22,6 +22,23 @@
 #
 # (5) get_margins: creates impassable border at edge of raster (to prevent 
 # adjacencies wrapping around to other side of matrix)
+#
+# Note: bizarre bug in igraph function that will generate duplicate vertices for
+# *some* values of xe+05. So far have seen x values of 5, 7, 9, and 10. In all
+# cases observed so far, the e+05 version only has incoming edges, while the
+# x00000 version only has outgoing edges. The workaround is to identify these
+# failure cases, reroute the incoming edges to the x00000 version (creating a
+# correctly connected vertex in the graph), and then remove the e+05 version.
+# 
+# It apparently only affects a tiny number of cases (e.g. 4 duplicated nodes in
+# a network of ~2.7e06 vertices), so is going to have an ignorable impact on
+# results, but fixing regardless. Need to write a reproducible example and submit
+# as an error.
+# 
+# The check to catch further cases that do not follow the observed rule is to
+# compare the number of vertices listed in dat2 (from and to columns) to the
+# length of the names in the graph
+#
 
 # dependencies
 library(dplyr); library(data.table); library(igraph)
@@ -29,11 +46,19 @@ library(dplyr); library(data.table); library(igraph)
 # generate the graph of all cells (travelling up- or along-slope, i.e from smaller
 # values to larger) 
 generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule=1) {
-  
-  # generate adjacencies, then remove adjacencies that aren't permitted
-  dat <- data.table(from = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
-                    to = get_adjacent(permitted_cells, n_row, n_col, rule)) %>%
-    .[to %in% permitted_cells] 
+  # generate adjacencies
+  adj <- data.table(from = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
+                    to = get_adjacent(permitted_cells, n_row, n_col, rule))
+  # remove non-permitted adjacencies
+  dat <- adj[to %in% permitted_cells,] 
+  # this drops cells without *any* permitted adjacencies, but these are needed 
+  # for calculating occupied area (but don't need including in graph)
+  disc_cells <- data.table(
+    id_cell = permitted_cells[!(permitted_cells %in% unique(dat$from))]
+    )
+  disc_cells[, id_vertex := NA]
+  disc_cells[, ele := ele_vec[id_cell]]
+  disc_cells[, disc := TRUE]
   
   # get elevations for from and to vertices
   dat[,c("from_ele", "to_ele") := list(ele_vec[from], ele_vec[to])]
@@ -44,38 +69,48 @@ generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule=1) {
   dat2 <- rbind(dat[from_ele > to_ele,], dat[from_ele == to_ele,])
   
   # NOTE: don't particularly need ordering here, but have retained anyway
-  # order to create necessary ordering for dfs: dfs algorithm will jump to 
+  # order to create necessary ordering for search: algorithm will jump to 
   # new roots in order of vertices: by giving edge df in order of elevation, 
   # this ensures it will always start from the next highest unreached vertex. 
   setorder(dat2, -from_ele, -to_ele)
   
   # generate graph from adjacencies
-  g <- graph_from_data_frame(dat2, directed = T)
+  g <- graph_from_data_frame(dat2[,list(from, to)], directed = T)
   
-  return(g)
+  # generate lookup table
+  vertex_names <- names(V(g))
+  graph_vertices <- data.table(id_cell = as.integer(vertex_names[]), 
+                               id_vertex = 1:length(vertex_names)) 
+  graph_vertices[,ele := ele_vec[id_cell]]
+  graph_vertices[,disc := FALSE]
+  
+  # return graph, data.table of vertices, and data.table of disconnected cells
+  list(graph = g, 
+       df_vertices = rbind(graph_vertices[!duplicated(id_cell),], disc_cells), 
+       duplicates = graph_vertices[duplicated(id_cell), id_cell])
 }
 
 # given the graph, associated vector of elevations, and cells in range at outset
 # calculate all accessible future cells (and append associated elevations)
-get_range <- function(graph, ele_vec, start_cells) {
+get_range <- function(graph_output, ele_vec, start_cells) {
+  # unpack graph outputs
+  graph_vertices <- graph_output$df_vertices
   
-  # generate lookup table
-  graph_vertices <- V(graph)$name %>%
-    data.table(id_cell = as.integer(.), id_vertex = 1:length(.)) 
-  graph_vertices[,ele := ele_vec[id_cell]]
+  # identify start vertices
+  start_vertices <- graph_vertices[id_cell %in% start_cells & disc==FALSE, id_vertex]
   
-  start_vertices <- graph_vertices[id_cell %in% start_cells, id_vertex]
-  
-  # run dfs
-  # housekeeping: fix igraph behaviour to correctly store father vertices
+  # run bfs
+  # fix igraph behaviour to correctly store father vertices
   igraph_options(add.vertex.names=F)
-  bfs_out <- bfs(graph, root = start_vertices, unreachable = F, neimode="in")
+  bfs_out <- bfs(graph_output$graph, root = start_vertices, unreachable = F, neimode="in")
   
   # now generate ordering for doing the membership calculation: NAs aren't reachable
   graph_vertices[as.numeric(bfs_out$order), ordering := 1:.N]
+  graph_vertices[, start_cell := ifelse(id_cell %in% start_cells, T, F)]
   setorder(graph_vertices, ordering)
   
-  return(graph_vertices[])
+  # return vertices, dropping unreached cells (but retain start vertices)
+  return(graph_vertices[!is.na(ordering) & disc == FALSE,])
 }
 
 # get maximum elevation accessible from each cell
