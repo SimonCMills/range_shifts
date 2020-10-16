@@ -45,7 +45,7 @@ library(dplyr); library(data.table); library(igraph)
 
 # generate the graph of all cells (travelling up- or along-slope, i.e from smaller
 # values to larger) 
-generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule=1) {
+generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
   # generate adjacencies
   adj <- data.table(from = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
                     to = get_adjacent(permitted_cells, n_row, n_col, rule))
@@ -67,27 +67,88 @@ generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule=1) {
   # retention index; if they are the same elevation retain both (as path needs
   # to be bidirectional)
   dat2 <- rbind(dat[from_ele > to_ele,], dat[from_ele == to_ele,])
-  
-  # NOTE: don't particularly need ordering here, but have retained anyway
-  # order to create necessary ordering for search: algorithm will jump to 
-  # new roots in order of vertices: by giving edge df in order of elevation, 
-  # this ensures it will always start from the next highest unreached vertex. 
-  setorder(dat2, -from_ele, -to_ele)
-  
+  class(dat2$from)
   # generate graph from adjacencies
   g <- graph_from_data_frame(dat2[,list(from, to)], directed = T)
   
   # generate lookup table
+  # note: This won't ever matter for my use, but treating as an integer will mean 
+  # indexing tops out somewhere around 2e+09 (as 32-bit)
   vertex_names <- names(V(g))
   graph_vertices <- data.table(id_cell = as.integer(vertex_names[]), 
                                id_vertex = 1:length(vertex_names)) 
   graph_vertices[,ele := ele_vec[id_cell]]
   graph_vertices[,disc := FALSE]
   
-  # return graph, data.table of vertices, and data.table of disconnected cells
+  ##############################################################################
+  # workaround for igraph bug: get all incoming and outgoing edges from vertices
+  # that have been duplicated (incoming always associated with xe+ version and
+  # outgoing always associated with x0 version). Identify the vertices associated
+  # with incoming edges, create incoming edges from these vertices to the x0 
+  # version of the duplicated nodes, and then delete the xe+ version from the 
+  # graph. See more extensive discussion of the issue in unit testing markdown file. 
+  
+  # get duplicated vertices
+  duplicated_vertices <- 
+    graph_vertices[id_cell %in% graph_vertices[duplicated(id_cell),id_cell]]
+  setorder(duplicated_vertices, id_cell, id_vertex)
+  
+  # x0.. version has the outgoing vertices
+  incoming <- adjacent_vertices(g, duplicated_vertices$id_vertex, mode="in")
+  # xe+.. version has incoming vertices
+  outgoing <- adjacent_vertices(g, duplicated_vertices$id_vertex, mode="out")
+  
+  # retain only the x0 version: get the vertices reached from the xe+ version, 
+  # add these edges to the x0 version, and then delete the xe+ vertices from the 
+  # graph
+  in_xe_ver <- incoming[lapply(incoming, length) != 0]
+  
+  # create vector of edge starts (as.integer coerces e+05 form to 00 form)
+  in_vert_from <- rep(names(in_xe_ver), unlist(lapply(in_xe_ver, length))) %>%
+    as.integer
+  
+  # vector of edge ends
+  in_vert_to <- lapply(in_xe_ver, function(x) as.integer(names(x))) %>% unlist %>%
+    as.integer
+  
+  # interleave these two vectors
+  edges_to_add <- as.vector(rbind(in_vert_from, in_vert_to))
+  
+  # add new edges to graph
+  g <- add_edges(g, edges_to_add)
+  
+  # remove xe+ vertices from graph
+  g <- delete_vertices(g, 
+                       duplicated_vertices$id_vertex[grepl("\\+", names(outgoing))])
+  
+  ## rerun lookup table code block
+  # generate lookup table
+  # note: This won't ever matter for my use, but treating as an integer will mean 
+  # indexing tops out somewhere around 2e+09 (as 32-bit)
+  vertex_names <- names(V(g))
+  graph_vertices <- data.table(id_cell = as.integer(vertex_names[]), 
+                               id_vertex = 1:length(vertex_names)) 
+  graph_vertices[,ele := ele_vec[id_cell]]
+  graph_vertices[,disc := FALSE]
+  ##############################################################################
+  
+  # bind the dataframe of all the cells in the graph to the dataframe of the 
+  # disconnected cells not in the graph
+  for_return <- rbind(graph_vertices[!duplicated(id_cell),], disc_cells)
+  
+  # sanity check: this final dataframe containing the cells that are disconnected 
+  # from the graph *and* all the cells in the graph, should be equal to the total
+  # number of forested cells provided at the outset
+  if(nrow(for_return) != length(permitted_cells)) stop("length mismatch")
+  
+  # return graph, data.table of vertices, and the two lists of ingoing and
+  # outgoing edges from duplicated cells (errors should be caught by the above
+  # check: but can visually check these lists after the event to confirm there
+  # aren't additional failure cases)
   list(graph = g, 
-       df_vertices = rbind(graph_vertices[!duplicated(id_cell),], disc_cells), 
-       duplicates = graph_vertices[duplicated(id_cell), id_cell])
+       df_vertices = for_return[], 
+       dup_in_edges = incoming, 
+       dup_out_edges = outgoing)
 }
 
 # given the graph, associated vector of elevations, and cells in range at outset
