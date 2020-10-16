@@ -2,7 +2,9 @@
 title: "Description and unit testing movement functions"
 author: "Simon Mills"
 date: "13/10/2020"
-output: html_document
+output: 
+    html_document:
+        number_sections: true
 ---
 # Overview
 __Series of tests on simplified matrices to check function behaviour is as expected.__
@@ -18,16 +20,20 @@ Movement functions all depend on igraph for constructing network of linked cells
 ## Important:
 
 - There is a bug in the igraph function that will very (very) infrequently generate duplicate vertices for
-*some* values of xe+05. So far have seen x values of 5, 7, 9, and 10. In all cases observed so far, the xe+05 version only has incoming edges, while the x00000 version only has outgoing edges. The workaround is to identify these failure cases, reroute the incoming edges to the x00000 version (creating a correctly connected vertex in the graph), and then remove the xe+05 vertices.
+*some* values by generating scientific notation equivalents (eg. a vertex for both 500000 *and* 5e+05). So far have observed x values of of 5, 7, 9, and 10. In all cases observed so far, the xe+05 version only has incoming edges, while the x00000 version only has outgoing edges. 
 
-- It apparently only affects a tiny number of cases (e.g. 4 duplicated nodes in a network of ~2.7e06 vertices), so is going to have an ignorable impact on results, but will apply this fix regardless. For Cordillera Central de Ecuador, 24 vertices are duplicated in this manner (presumably stored as e+06 and 07), again this is a diminishingly small number out of a graph of 28 million vertices. 
+- It apparently only affects a tiny number of cases (e.g. 4 duplicated nodes in a network of ~2.7e06 vertices), so is going to have an ignorable impact on results, but have fixed regardless. 
+
+- UPDATE: For Cordillera Central de Ecuador, 24 vertices are duplicated in this manner (presumably stored as e+06 and e+07), again this is a diminishingly small number out of a graph of 28 million vertices. 
 ```{r, eval=F}
 [1] 100000000  64000000  73000000  88000000  77000000  65000000 112000000  61000000  49000000  66000000  98000000
 [12]  89000000  38000000 126000000 113000000  80000000  60000000 102000000 103000000  23000000 114000000  59000000
 [23]  90000000  71000000
 ```
 
-- I am currently removing duplicates (which will create a false break in the network) and recording the number of duplicate cases. 
+- The workaround is to identify these failure cases, reroute the incoming edges to the x000.. version (creating a correctly connected vertex in the graph), and then remove the xe+0.. version of the vertices. This appears to resolve the issue. 
+
+- The sanity check is that there should be the same number of cells in the eventuating graph and set of cells identified as disconnected from the graph as there are in the total number of permitted cells provided at the outset. I've also stored the list of duplicated cells to confirm that there is no additional behaviour beyond that already described here.  
 
 - Need to generate a reproducible example and submit as an error.
 
@@ -41,6 +47,8 @@ Movement functions all depend on igraph for constructing network of linked cells
 
 - Time and memory should scale approximately linearly (and this does indeed appear to be the case). Cordillera Central de Ecuador is a large mountain range, and the results from this therefore suggest that *any* tropical mountain range should be computationally feasable at this spatial resolution. 
 
+----
+# UNIT TESTS
 ```{r setup, message=F}
 library(raster); library(igraph); library(dplyr); library(data.table)
 source("functions_igraph.R")
@@ -52,7 +60,8 @@ plot_mat <- function(x, ...) plot(raster(x), ...)
 
 ```
 
-# Test 1: spread of algorithm under varying gap-crossing
+
+## Spread of algorithm under varying gap-crossing
 Note this is just isolating the mechanism of spread through the graph, with varying gap-crossing ability. This spread function is not called directly in the main functions. 
 
 ```{r}
@@ -121,7 +130,7 @@ plot_mat(mat2, asp=1, main = "Spread, 2-cell search radius")
 plot_mat(mat3, asp=1, main = "Spread, 3-cell search radius")
 ```
 
-# Test 2: get all cells up-gradient from a start cell
+## Get all cells up-gradient from a start cell
 (i.e. travelling from smaller values to larger, as is the case moving up or along an elevational gradient)
 ```{r}
 # get all cells that are accessible up-gradient from a start-cell
@@ -160,7 +169,7 @@ mat_tmp <- test_mat; mat_tmp[ranges[!is.na(ordering), id_cell]] <- 2
 plot_mat(mat_tmp, main="Accessed cells")
 ```
 
-## Variant with connection upslope 
+### Variant with connection upslope 
 ```{r}
 # get all cells that are accessible up-gradient from a start-cell (alternative
 # version with linkage upslope)
@@ -199,7 +208,7 @@ mat_tmp <- test_mat; mat_tmp[ranges[!is.na(ordering), id_cell]] <- 2
 plot_mat(mat_tmp, main="Accessed cells")
 ```
 
-## Variant with connection upslope (swapped gradient)
+### Variant with connection upslope (swapped gradient)
 ```{r}
 # get all cells that are accessible up-gradient from a start-cell (alternative
 # version with linkage upslope)
@@ -238,7 +247,7 @@ mat_tmp <- test_mat; mat_tmp[ranges[!is.na(ordering), id_cell]] <- 2
 plot_mat(mat_tmp, main="Accessed cells")
 ```
 
-## Variant with up-gradient movement from multiple start-points
+### Variant with up-gradient movement from multiple start-points
 ```{r}
 test_mat <- as.matrix(raster("../figures/test_range_shift_3.png"))
 
@@ -276,7 +285,7 @@ mat_tmp[ranges[start_cell == T, id_cell]] <- 4
 plot_mat(mat_tmp, main="Accessed cells and start-cell")
 ```
 
-## Variant with up-gradient movement from multiple start-points (swapped gradient)
+### Variant with up-gradient movement from multiple start-points (swapped gradient)
 ```{r}
 test_mat <- as.matrix(raster("../figures/test_range_shift_3.png"))
 
@@ -315,7 +324,7 @@ plot_mat(mat_tmp, main="Accessed cells and start-cell")
 
 ```
 
-# Test X (out of action; eval=F)
+## Test X (out of action; eval=F)
 ```{r, eval=F}
 # Does function correctly track niche through time?
 # create an elevational gradient
