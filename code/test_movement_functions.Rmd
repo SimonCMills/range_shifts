@@ -67,37 +67,37 @@ Note this is just isolating the mechanism of spread through the graph, with vary
 ```{r}
 # read 65*50 matrix that has "permitted movement" cells spaced contiguously, 
 # 1-cell removed, and 2-cell removed
-test_mat <- as.matrix(raster("../data/test_imgs/test_gap_crossing_rule.png"))
-start_cell <- which(test_mat[] == 237)
-test_mat[test_mat[] %in% c(0, 237)] <- 1
-test_mat[test_mat[] == 255] <- 0
-
-# for spread function
-n_row <- dim(test_mat)[1]
-n_col <- dim(test_mat)[2]
-permitted_cells <- which(test_mat == 1)
-
-# run
-fill1 <- spread_igraph(permitted_cells, start_cell, n_row, n_col, rule=1)
-fill2 <- spread_igraph(permitted_cells, start_cell, n_row, n_col, rule=2)
-fill3 <- spread_igraph(permitted_cells, start_cell, n_row, n_col, rule=3)
-
-# fill points reached by algorithm
-mat1 <- test_mat; mat1[fill1] <- 2
-mat2 <- test_mat; mat2[fill2] <- 2
-mat3 <- test_mat; mat3[fill3] <- 2
-
-# save results
-par(mfrow=c(2,2))
-permitted_plot <- test_mat
-permitted_plot[start_cell] <- 2
-plot_mat(permitted_plot, asp=1, main = "Permitted movement & start")
-plot_mat(mat1, asp=1, main = "Spread, 1-cell search radius")
-plot_mat(mat2, asp=1, main = "Spread, 2-cell search radius")
-plot_mat(mat3, asp=1, main = "Spread, 3-cell search radius")
+# test_mat <- as.matrix(raster("../data/test_imgs/test_gap_crossing_rule.png"))
+# start_cell <- which(test_mat[] == 237)
+# test_mat[test_mat[] %in% c(0, 237)] <- 1
+# test_mat[test_mat[] == 255] <- 0
+# 
+# # for spread function
+# n_row <- dim(test_mat)[1]
+# n_col <- dim(test_mat)[2]
+# permitted_cells <- which(test_mat == 1)
+# 
+# # run
+# fill1 <- spread_igraph(permitted_cells, start_cell, n_row, n_col, rule=1)
+# fill2 <- spread_igraph(permitted_cells, start_cell, n_row, n_col, rule=2)
+# fill3 <- spread_igraph(permitted_cells, start_cell, n_row, n_col, rule=3)
+# 
+# # fill points reached by algorithm
+# mat1 <- test_mat; mat1[fill1] <- 2
+# mat2 <- test_mat; mat2[fill2] <- 2
+# mat3 <- test_mat; mat3[fill3] <- 2
+# 
+# # save results
+# par(mfrow=c(2,2))
+# permitted_plot <- test_mat
+# permitted_plot[start_cell] <- 2
+# plot_mat(permitted_plot, asp=1, main = "Permitted movement & start")
+# plot_mat(mat1, asp=1, main = "Spread, 1-cell search radius")
+# plot_mat(mat2, asp=1, main = "Spread, 2-cell search radius")
+# plot_mat(mat3, asp=1, main = "Spread, 3-cell search radius")
 ```
 
-```{r}
+```{r, eval=F}
 # read 65*50 matrix that has "permitted movement" cells spaced contiguously, 
 # 1-cell removed, and 2-cell removed
 test_mat <- as.matrix(raster("../data/test_imgs/pikachu.png"))
@@ -134,7 +134,7 @@ plot_mat(mat3, asp=1, main = "Spread, 3-cell search radius")
 (i.e. travelling from smaller values to larger, as is the case moving up or along an elevational gradient)
 ```{r}
 # get all cells that are accessible up-gradient from a start-cell
-test_mat <- as.matrix(raster("../figures/test_range_shift_1.png"))
+test_mat <- as.matrix(raster("../data/test_imgs/test_range_shift_1.png"))
 
 # get start cell
 in_range <- which(test_mat[] == 237)
@@ -173,7 +173,7 @@ plot_mat(mat_tmp, main="Accessed cells")
 ```{r}
 # get all cells that are accessible up-gradient from a start-cell (alternative
 # version with linkage upslope)
-test_mat <- as.matrix(raster("../figures/test_range_shift_2.png"))
+test_mat <- as.matrix(raster("../data/test_imgs/test_range_shift_2.png"))
 
 # get start cell
 in_range <- which(test_mat[] == 237)
@@ -212,7 +212,7 @@ plot_mat(mat_tmp, main="Accessed cells")
 ```{r}
 # get all cells that are accessible up-gradient from a start-cell (alternative
 # version with linkage upslope)
-test_mat <- as.matrix(raster("../figures/test_range_shift_2.png"))
+test_mat <- as.matrix(raster("../data/test_imgs/test_range_shift_2.png"))
 
 # get start cell
 in_range <- which(test_mat[] == 237)
@@ -249,7 +249,7 @@ plot_mat(mat_tmp, main="Accessed cells")
 
 ### Variant with up-gradient movement from multiple start-points
 ```{r}
-test_mat <- as.matrix(raster("../figures/test_range_shift_3.png"))
+test_mat <- as.matrix(raster("../data/test_imgs/test_range_shift_3.png"))
 
 # get start cell
 in_range <- which(test_mat[] == 237)
@@ -287,7 +287,7 @@ plot_mat(mat_tmp, main="Accessed cells and start-cell")
 
 ### Variant with up-gradient movement from multiple start-points (swapped gradient)
 ```{r}
-test_mat <- as.matrix(raster("../figures/test_range_shift_3.png"))
+test_mat <- as.matrix(raster("../data/test_imgs/test_range_shift_3.png"))
 
 # get start cell
 in_range <- which(test_mat[] == 237)
