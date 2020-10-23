@@ -41,6 +41,13 @@ generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
   # get elevations for from and to vertices
   dat[,c("from_ele", "to_ele") := list(ele_vec[from], ele_vec[to])]
   
+  # remove pathways that travel upwards or downwards by more than 200m within 
+  # 60m (i.e. a gradient of 75 degrees, i.e. a cliff)
+  dat2 <- dat2[abs(from_ele - to_ele) < 200,]
+  
+  # remove redundant object (frees up several GB in the case of Santa Marta)
+  rm(adj)
+  
   # this drops cells without *any* permitted adjacencies, but need to retain for
   # for calculating occupied area (keep them in graph because it simplifies 
   # process downstream). 
@@ -56,6 +63,15 @@ generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
   
   # generate graph from adjacencies
   g <- graph_from_data_frame(dat2[,list(from, to)], directed = T)
+  
+  # remove redundant object (after graph is generated)
+  # Not sure exactly what the total saving is due to reference in data.table, but 
+  # adj is [216e+06, 2] and dat2 is [4, 201e+06], all cols integer-valued in the 
+  # case of Cordillera Central de Ecuador (large mountain range), corresponding 
+  # to an object size of 4GB for dat2. 
+  rm(dat2)
+  
+  # add dropped vertices (those without neighbours)
   g <- g + vertices(dropped_cells)
 
   # generate lookup table
@@ -94,7 +110,7 @@ generate_graph_undir <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
   
   # remove pathways that travel upwards or downwards by more than 200m within 
   # 60m (i.e. a gradient of 75 degrees, i.e. a cliff)
-  dat2 <- dat2[(abs(from_ele - to_ele) > 200),]
+  dat2 <- dat2[abs(from_ele - to_ele) < 200,]
 
   # remove redundant object (frees up several GB in the case of Santa Marta)
   rm(adj)
@@ -118,7 +134,7 @@ generate_graph_undir <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
   # to an object size of 4GB for dat2. 
   rm(dat2)
   
-  # add disconnected vertices 
+  # add dropped vertices (those without neighbours)
   g <- g + vertices(dropped_cells)
   
   # generate lookup table
@@ -141,37 +157,58 @@ generate_graph_undir <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
   # check: but can visually check these lists after the event to confirm there
   # aren't additional failure cases)
   list(graph = g, 
-       df_vertices = graph_vertices, 
-       dup_in_edges = ifelse(igraph_duplication == FALSE, NA, incoming), 
-       dup_out_edges = ifelse(igraph_duplication == FALSE, NA, outgoing))
+       df_vertices = graph_vertices)
 }
 
 
 # given the graph, associated lookup table with elevations, and a start range
 # calculate all accessible future cells (and append associated elevations)
-get_new_range <- function(graph_output, start_cells) {
-  # unpack graph outputs 
-  all_vertices <- copy(graph_output$df_vertices)
+get_new_range <- function(graph_out, x, increment, n_steps) {
+  # copy vertices
+  df_vertices <- copy(graph_out$df_vertices)
+  df_vertices[ele >= x["lwr"]  & ele < x["upr"], t := 0]
   
-  # identify start vertices
-  start_vertices <- all_vertices[id_cell %in% start_cells, id_vertex]
+  # initialise start cells at t == 0 (only searching upper perimeter)
+  start_cells <- df_vertices[t == 0 & ele >= x["upr"] - 200, id_cell]
   
-  # run bfs
-  # fix igraph behaviour to correctly store father vertices
-  igraph_options(add.vertex.names=F)
-  bfs_out <- bfs(graph_output$graph, 
-                 root = start_vertices, 
-                 unreachable = FALSE, # i.e. don't start from unspecified vertices 
-                 neimode="out")
+  # No cell is more than 200m asl different from neighbour (by design: >200m 
+  # adjacencies are removed). Logically therefore, only need to search within 
+  # 200m of the upper edge. Either a cell is within 200m of an edge and therefore 
+  # will be able to move up if a pathway exists once the boundary is relaxed, or 
+  # it is more than 200m from the elevational limit, in which case movement is not
+  # allowed anyway
+  for(i in 1:n_steps) {
+    # first trim to available subgraph in timestep i
+    # note: lower range never exceeds the upper limit of the range at t == 0, 
+    # which are already stored at the outset. Can therefore set the lower bound
+    # as a static x["upr"] - 200
+    retain_vertices <- df_vertices[ele >= x["upr"] - (200 + increment) + increment*i & 
+                                     ele < x["upr"] + increment*i, id_vertex]
+    subgraph_i <- induced_subgraph(graph_out$graph, retain_vertices)
+    
+    # generate new lookup table
+    vertex_names <- names(V(subgraph_i))
+    subgraph_vertices <- data.table(id_cell = as.integer(vertex_names[]), 
+                                    id_vertex = 1:length(vertex_names)) 
+    
+    # generate start vertices and run bfs
+    start_vertices <- subgraph_vertices[id_cell %in% start_cells, id_vertex]
+    bfs_i <- bfs(subgraph_i, start_vertices, unreachable = FALSE)
+    
+    # get cells that are reached by algo (this includes start cells)
+    reached_cells <- subgraph_vertices[id_vertex %in% as.integer(bfs_i$order), id_cell]
+    
+    # update range info: all cells that are not in the start cells AND
+    # are in the reached cells get the t-column updated (i.e. reached at time t)
+    df_vertices[!(id_cell %in% start_cells) & id_cell %in% reached_cells, t := i]
+    
+    # update start cells for next iteration
+    # note: reached_cells are cells include both start_cells and new cells
+    start_cells <- subgraph_vertices[id_cell %in% reached_cells, id_cell]
+  }
   
-  # now generate ordering for doing the membership calculation: NAs aren't reachable
-  all_vertices[as.numeric(bfs_out$order), ordering := 1:.N]
-  all_vertices[, start_cell := ifelse(id_cell %in% start_cells, T, F)]
-  setorder(all_vertices, ordering)
-  
-  # return vertices, dropping unreached cells (retain start vertices is implied 
-  # as start vertices will be given an order)
-  return(all_vertices[!is.na(ordering),])
+  # return dataframe of reached cells 
+  return(df_vertices[!is.na(t),])
 }
 
 # get maximum elevation accessible from each cell
