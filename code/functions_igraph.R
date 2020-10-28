@@ -41,25 +41,25 @@ generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
   # get elevations for from and to vertices
   dat[,c("from_ele", "to_ele") := list(ele_vec[from], ele_vec[to])]
   
-  # remove pathways that travel upwards or downwards by more than 200m within 
-  # 60m (i.e. a gradient of 75 degrees, i.e. a cliff)
-  dat2 <- dat2[abs(from_ele - to_ele) < 200,]
-  
   # remove redundant object (frees up several GB in the case of Santa Marta)
   rm(adj)
   
-  # this drops cells without *any* permitted adjacencies, but need to retain for
-  # for calculating occupied area (keep them in graph because it simplifies 
-  # process downstream). 
-  dropped_cells <- permitted_cells[!(permitted_cells %in% unique(dat$from))]
-  
   dat2 <- rbind(dat[from_ele > to_ele,],
                 dat[from_ele == to_ele,])
+  
+  # remove pathways that travel upwards or downwards by more than 200m within 
+  # 60m (i.e. a gradient of 75 degrees, i.e. a cliff)
+  dat2 <- dat2[abs(from_ele - to_ele) < 200,]
   
   # order to create necessary ordering for dfs: dfs algorithm will jump to 
   # new roots in order of vertices: by giving edge df in order of elevation, 
   # this ensures it will always start from the next highest unreached vertex
   setorder(dat2, -from_ele, -to_ele)
+  
+  # this drops cells without *any* permitted adjacencies, but need to retain for
+  # for calculating occupied area (keep them in graph because it simplifies 
+  # process downstream). 
+  dropped_cells <- permitted_cells[!(permitted_cells %in% unique(dat2$from))]
   
   # generate graph from adjacencies
   g <- graph_from_data_frame(dat2[,list(from, to)], directed = T)
@@ -114,15 +114,16 @@ generate_graph_undir <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
 
   # remove redundant object (frees up several GB in the case of Santa Marta)
   rm(adj)
-  # this drops cells without *any* permitted adjacencies, but need to retain for
-  # for calculating occupied area (keep them in graph because it simplifies 
-  # process downstream). 
-  dropped_cells <- permitted_cells[!(permitted_cells %in% unique(dat2$from))]
   
   # order to create necessary ordering for dfs: dfs algorithm will jump to 
   # new roots in order of vertices: by giving edge df in order of elevation, 
   # this ensures it will always start from the next highest unreached vertex
   setorder(dat2, -from_ele, -to_ele)
+  
+  # this drops cells without *any* permitted adjacencies, but need to retain for
+  # for calculating occupied area (keep them in graph because it simplifies 
+  # process downstream). 
+  dropped_cells <- permitted_cells[!(permitted_cells %in% unique(dat2$from))]
   
   # generate graph from adjacencies
   g <- graph_from_data_frame(dat2[,list(from, to)], directed = FALSE)
@@ -205,6 +206,9 @@ get_new_range <- function(graph_out, x, increment, n_steps) {
     # update start cells for next iteration
     # note: reached_cells are cells include both start_cells and new cells
     start_cells <- subgraph_vertices[id_cell %in% reached_cells, id_cell]
+    
+    # record cells that have dropped out of range
+    df_vertices[t == 0 & ele < x["lwr"] + increment*i, t := -i]
   }
   
   # return dataframe of reached cells 
