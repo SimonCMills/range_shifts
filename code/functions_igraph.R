@@ -100,118 +100,137 @@ generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
 # generate the graph of all cells accessible through forest
 generate_graph_undir <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
   # generate adjacencies
-  adj <- data.table(from = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
+  adj <- data.table(from = rep(permitted_cells, (rule*2 + 1)^2 - 1),
                     to = get_adjacent(permitted_cells, n_row, n_col, rule))
   # remove non-permitted adjacencies
-  dat2 <- adj[to %in% permitted_cells,] 
-  
+  dat2 <- adj[to %in% permitted_cells,]
+
   # get elevations for from and to vertices
   dat2[,c("from_ele", "to_ele") := list(ele_vec[from], ele_vec[to])]
-  
-  # remove pathways that travel upwards or downwards by more than 200m within 
+
+  # remove pathways that travel upwards or downwards by more than 200m within
   # 60m (i.e. a gradient of 75 degrees, i.e. a cliff)
   dat2 <- dat2[abs(from_ele - to_ele) < 200,]
 
   # remove redundant object (frees up several GB in the case of Santa Marta)
   rm(adj)
-  
-  # order to create necessary ordering for dfs: dfs algorithm will jump to 
-  # new roots in order of vertices: by giving edge df in order of elevation, 
+
+  # order to create necessary ordering for dfs: dfs algorithm will jump to
+  # new roots in order of vertices: by giving edge df in order of elevation,
   # this ensures it will always start from the next highest unreached vertex
   setorder(dat2, -from_ele, -to_ele)
-  
+
   # this drops cells without *any* permitted adjacencies, but need to retain for
-  # for calculating occupied area (keep them in graph because it simplifies 
-  # process downstream). 
+  # for calculating occupied area (keep them in graph because it simplifies
+  # process downstream).
   dropped_cells <- permitted_cells[!(permitted_cells %in% unique(dat2$from))]
-  
+
   # generate graph from adjacencies
   g <- graph_from_data_frame(dat2[,list(from, to)], directed = FALSE)
-  
+
   # remove redundant object (after graph is generated)
-  # Not sure exactly what the total saving is due to reference in data.table, but 
-  # adj is [216e+06, 2] and dat2 is [4, 201e+06], all cols integer-valued in the 
-  # case of Cordillera Central de Ecuador (large mountain range), corresponding 
-  # to an object size of 4GB for dat2. 
+  # Not sure exactly what the total saving is due to reference in data.table, but
+  # adj is [216e+06, 2] and dat2 is [4, 201e+06], all cols integer-valued in the
+  # case of Cordillera Central de Ecuador (large mountain range), corresponding
+  # to an object size of 4GB for dat2.
   rm(dat2)
-  
+
   # add dropped vertices (those without neighbours)
   g <- g + vertices(dropped_cells)
-  
+
   # generate lookup table
-  # note: This won't ever matter for my use, but treating as an integer will mean 
+  # note: This won't ever matter for my use, but treating as an integer will mean
   # indexing tops out somewhere around 2e+09 (as 32-bit)
   vertex_names <- names(V(g))
-  graph_vertices <- data.table(id_cell = as.integer(vertex_names[]), 
-                               id_vertex = 1:length(vertex_names)) 
+  graph_vertices <- data.table(id_cell = as.integer(vertex_names[]),
+                               id_vertex = 1:length(vertex_names))
   graph_vertices[, ele := ele_vec[id_cell]]
   graph_vertices[, isolated := FALSE]
   graph_vertices[id_cell %in% dropped_cells, isolated := TRUE]
-  
-  # sanity check: this final dataframe containing the cells that are disconnected 
+
+  # sanity check: this final dataframe containing the cells that are disconnected
   # from the graph *and* all the cells in the graph, should be equal to the total
   # number of forested cells provided at the outset
   if(nrow(graph_vertices) != length(permitted_cells)) stop("length mismatch")
-  
-  # return graph, data.table of vertices, and the two lists of ingoing and
-  # outgoing edges from duplicated cells (errors should be caught by the above
-  # check: but can visually check these lists after the event to confirm there
-  # aren't additional failure cases)
-  list(graph = g, 
+
+  # return graph, data.table of vertices
+  list(graph = g,
        df_vertices = graph_vertices)
 }
 
 
 # given the graph, associated lookup table with elevations, and a start range
 # calculate all accessible future cells (and append associated elevations)
-get_new_range <- function(graph_out, x, increment, n_steps) {
+get_new_range <- function(graph_out, upr_limit, range_width, increment, n_steps) {
   # copy vertices
   df_vertices <- copy(graph_out$df_vertices)
-  df_vertices[ele >= x["lwr"]  & ele < x["upr"], t := 0]
-  
+  # identify cells in range at t==0
+  df_vertices[ele >= upr_limit - range_width  & ele < upr_limit, t := 0] 
+
   # initialise start cells at t == 0 (only searching upper perimeter)
-  start_cells <- df_vertices[t == 0 & ele >= x["upr"] - 200, id_cell]
-  
-  # No cell is more than 200m asl different from neighbour (by design: >200m 
-  # adjacencies are removed). Logically therefore, only need to search within 
-  # 200m of the upper edge. Either a cell is within 200m of an edge and therefore 
-  # will be able to move up if a pathway exists once the boundary is relaxed, or 
+  start_cells <- df_vertices[t == 0 & ele >= upr_limit - 200, id_cell]
+
+  # No cell is more than 200m asl different from neighbour (by design: >200m
+  # adjacencies are removed). Logically therefore, only need to search within
+  # 200m of the upper edge. Either a cell is within 200m of an edge and therefore
+  # will be able to move up if a pathway exists once the boundary is relaxed, or
   # it is more than 200m from the elevational limit, in which case movement is not
   # allowed anyway
   for(i in 1:n_steps) {
     # first trim to available subgraph in timestep i
-    # note: lower range never exceeds the upper limit of the range at t == 0, 
+    # note: lower range never exceeds the upper limit of the range at t == 0,
     # which are already stored at the outset. Can therefore set the lower bound
     # as a static x["upr"] - 200
-    retain_vertices <- df_vertices[ele >= x["upr"] - (200 + increment) + increment*i & 
-                                     ele < x["upr"] + increment*i, id_vertex]
+    retain_vertices <- df_vertices[ele >= upr_limit - 200 + increment*(i-1) &
+                                     ele < upr_limit + increment*i, id_vertex]
     subgraph_i <- induced_subgraph(graph_out$graph, retain_vertices)
-    
+
     # generate new lookup table
     vertex_names <- names(V(subgraph_i))
-    subgraph_vertices <- data.table(id_cell = as.integer(vertex_names[]), 
-                                    id_vertex = 1:length(vertex_names)) 
-    
+    subgraph_vertices <- data.table(id_cell = as.integer(vertex_names[]),
+                                    id_vertex = 1:length(vertex_names))
+
     # generate start vertices and run bfs
     start_vertices <- subgraph_vertices[id_cell %in% start_cells, id_vertex]
     bfs_i <- bfs(subgraph_i, start_vertices, unreachable = FALSE)
-    
+
     # get cells that are reached by algo (this includes start cells)
     reached_cells <- subgraph_vertices[id_vertex %in% as.integer(bfs_i$order), id_cell]
-    
+
     # update range info: all cells that are not in the start cells AND
     # are in the reached cells get the t-column updated (i.e. reached at time t)
     df_vertices[!(id_cell %in% start_cells) & id_cell %in% reached_cells, t := i]
-    
+
     # update start cells for next iteration
-    # note: reached_cells are cells include both start_cells and new cells
+    # note: reached_cells include both start_cells and new cells (as algorithm
+    # will expand downwards, and by definition is linked to all start cells)
     start_cells <- subgraph_vertices[id_cell %in% reached_cells, id_cell]
+
+    # record cells that have dropped out of range
+    df_vertices[t == 0 & ele < upr_limit - range_width  + increment*i, t := -i]
+  }
+
+  # return dataframe of reached cells
+  return(df_vertices[!is.na(t),])
+}
+
+get_fm_range <- function(graph_out, upr_limit, range_width, increment, n_steps) {
+  # copy vertices
+  df_vertices <- copy(graph_out$df_vertices)
+  # identify cells in range at t==0
+  df_vertices[ele >= upr_limit - range_width  & ele < upr_limit, t := 0] 
+
+  for(i in 1:n_steps) {
+    # new cells
+    df_vertices[!(id_cell %in% df_vertices[!is.na(t), id_cell]) & 
+                  ele > upr_limit - range_width + increment*(i-1) &
+                  ele < upr_limit + increment*i, t := i]
     
     # record cells that have dropped out of range
-    df_vertices[t == 0 & ele < x["lwr"] + increment*i, t := -i]
+    df_vertices[t == 0 & ele < upr_limit - range_width  + increment*i, t := -i]
   }
   
-  # return dataframe of reached cells 
+  # return dataframe of reached cells
   return(df_vertices[!is.na(t),])
 }
 
