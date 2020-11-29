@@ -1,8 +1,10 @@
-# script to generate graphs & rangeshifts
+# script to generate graphs (both directed- for simulating range changes- and 
+# undirected- for calculating climate connectivity)
 
 # get elevations and treecover for mountain ranges
-fnames <- list.files("data/mountain_ranges/", full.names = T, pattern="60m")
-print(length(fnames))
+fnames <- list.files("data/mountain_ranges/", full.names = T, pattern="60m_10kbuffer")
+print(paste0("n_fnames: ", length(fnames)))
+
 # housekeeping
 library(raster); library(dplyr); library(data.table); library(igraph)
 source("code/functions_igraph.R")
@@ -20,6 +22,7 @@ range_names <- unique(gsub(".*60m_10kbuffer(.*)_2020.*", "\\1", fnames))
 # faster)
 for (i in 1:length(range_names)) {
     range_i <- range_names[i]
+    print(range_i)
     fnames_i <- fnames[grepl(range_i, fnames)]
     ele <-  raster(fnames_i[1])
     tc  <-  raster(fnames_i[2])
@@ -57,13 +60,13 @@ for (i in 1:length(range_names)) {
     rm(graph_out)
     
     # now generate directed graph (for climate connectivity metrics)
-    time_graph <- system.time(
-        graph_out <- generate_graph(ele_vec, permitted_cells, n_row, n_col, rule=1)
-    )
-    
-    # save graph (really slow to write but will save memory overhead in future 
-    # and is fast to read)
-    graph_out$time <- time_graph
-    saveRDS(graph_out, paste0("outputs/graph_dir_", range_i))
-    rm(graph_out)
+    # time_graph <- system.time(
+    #     graph_out <- generate_graph(ele_vec, permitted_cells, n_row, n_col, rule=1)
+    # )
+    # 
+    # # save graph (really slow to write but will save memory overhead in future 
+    # # and is fast to read)
+    # graph_out$time <- time_graph
+    # saveRDS(graph_out, paste0("outputs/graph_dir_", range_i))
+    # rm(graph_out)
 }
