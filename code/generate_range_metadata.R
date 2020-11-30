@@ -1,0 +1,49 @@
+# create dataframe of range metadata (min&max elevation, proportion in neotropics)
+
+# housekeeping
+library(raster); library(dplyr)
+
+## (1) copy all unique ranges ----
+# some duplicated downloads which need removing
+# get elevations and treecover for mountain ranges
+fnames <- list.files("D:/Drive/rgee_exports/", full.names = T, pattern="60m_10kbuffer")
+print(paste0("n_fnames: ", length(fnames)))
+
+range <- gsub("60m_10kbuffer", "", fnames) %>%
+    gsub(".*_exports/(.*)_2020.*", "\\1", .)
+
+# 119 mountain ranges in ranges in total
+length(range[!duplicated(range)])/2
+
+# copy
+file.copy(fnames[!duplicated(range)], "data/mountain_ranges/")
+
+## get raster info ----
+## (max ele and dimensions)
+fnames_2 <- list.files("data/mountain_ranges/", full.names=T, pattern = "ele_jaxa")
+range_2 <- gsub(".*60m_10kbuffer(.*)_2020.*", "\\1", fnames_2)
+
+df_rangeinfo <- data.table(range = range_2)
+for(i in 1:length(range_2)) {
+    r <- raster(fnames_2[i])
+    max_val_i <- max(r[]) 
+    min_val_i <- min(r[]) 
+    df_rangeinfo[i, `:=`(max_val = max_val_i, 
+                         min_val = min_val_i, 
+                         nrow = nrow(r), 
+                         ncol=ncol(r), 
+                         ncell=ncell(r))]
+}
+
+# 95 ranges have max elevation >= 1500
+nrow(df_rangeinfo[max_val >= 1500])
+
+mountain_ranges <- readRDS("data/mountain_polygons.rds") %>%
+    mutate(range = gsub("\\(|\\)", "", Name) %>%
+               gsub("ü", "u", .) %>% 
+               gsub("\\/", "--", .) %>%
+               gsub(" ", "_", .))
+
+mountains2 <- left_join(mountain_ranges, df_rangeinfo)
+
+saveRDS(mountains2, "data/range_metadata.rds")
