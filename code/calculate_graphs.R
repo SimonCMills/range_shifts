@@ -11,19 +11,21 @@ source("code/functions_igraph.R")
 
 range_names <- unique(gsub(".*60m_10kbuffer(.*)_2020.*", "\\1", fnames))
 
+# which graphs are already calculated? (avoid re-calculating)
+graphs_calculated <- list.files("Y:/edwards_lab1/User/bo1scm/range_shifts/outputs/", 
+                                "graph_undir") %>%
+    gsub("graph_undir_", "", .)
+
 # range metadata
+# arrange to calculate smallest graphs first, and remove those already calculated
+# Note: record maximum RAM overhead after run?
 range_mtd <- readRDS("data/range_metadata.rds") %>% 
     dplyr::select(-geometry) %>%
-    # filter(max_val >= 1500, prop_in_tropics >= .5) %>%
     as_tibble %>%
-    filter(max_val >= 1500, prop_in_tropics >= .5)  %>%
+    filter(max_val >= 1500, prop_in_tropics >= .5, !(range %in% graphs_calculated))  %>%
     arrange(desc(ncell))
 
-# should just run overnight- biggest mountain ranges will take 15 minutes or so
-# 40GB RAM and see how it gets on. If expand to tropics in general then maybe 
-# worth looping in parallel, but still talking about what, 100? 150? ranges, so 
-# still only 25 hours run time (and actually most mountains will be substantially 
-# faster)
+# loop across ranges and calculate graphs
 for (i in 1:length(range_mtd$range)) {
     range_i <- range_mtd$range[i]
     print(range_i)
