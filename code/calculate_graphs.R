@@ -9,21 +9,26 @@ print(paste0("n_fnames: ", length(fnames)))
 library(raster); library(dplyr); library(data.table); library(igraph)
 source("code/functions_igraph.R")
 
-# colour palette
-# cols <- colorRampPalette(c("#4575B4", "#74ADD1", "#ABD9E9", "#E0F3F8", "#FFFFBF", 
-#                            "#FEE090", "#FDAE61", "#F46D43", "#D73027"))
-
 range_names <- unique(gsub(".*60m_10kbuffer(.*)_2020.*", "\\1", fnames))
+
+# range metadata
+range_mtd <- readRDS("data/range_metadata.rds") %>% 
+    dplyr::select(-geometry) %>%
+    # filter(max_val >= 1500, prop_in_tropics >= .5) %>%
+    as_tibble %>%
+    filter(max_val >= 1500, prop_in_tropics >= .5)  %>%
+    arrange(desc(ncell))
 
 # should just run overnight- biggest mountain ranges will take 15 minutes or so
 # 40GB RAM and see how it gets on. If expand to tropics in general then maybe 
 # worth looping in parallel, but still talking about what, 100? 150? ranges, so 
 # still only 25 hours run time (and actually most mountains will be substantially 
 # faster)
-for (i in 1:length(range_names)) {
-    range_i <- range_names[i]
+for (i in 1:length(range_mtd$range)) {
+    range_i <- range_mtd$range[i]
     print(range_i)
     fnames_i <- fnames[grepl(range_i, fnames)]
+
     ele <-  raster(fnames_i[1])
     tc  <-  raster(fnames_i[2])
     
@@ -36,7 +41,7 @@ for (i in 1:length(range_names)) {
     tc_classified[tc_classified >= 50] <- 1
     
     # get permitted cells (adding 0-valued margin)
-    permitted_tc <- as.matrix(tc_classified)#[,1:1000]
+    permitted_tc <- as.matrix(tc_classified)
     permitted_tc[get_margins(permitted_tc)] <- 0
     # permitted_cells <- which(permitted_tc[] == 1)
     ele_vec <- as.numeric(as.matrix(ele))
@@ -58,15 +63,4 @@ for (i in 1:length(range_names)) {
     graph_out$time <- time_graph
     saveRDS(graph_out, paste0("outputs/graph_undir_", range_i))
     rm(graph_out)
-    
-    # now generate directed graph (for climate connectivity metrics)
-    # time_graph <- system.time(
-    #     graph_out <- generate_graph(ele_vec, permitted_cells, n_row, n_col, rule=1)
-    # )
-    # 
-    # # save graph (really slow to write but will save memory overhead in future 
-    # # and is fast to read)
-    # graph_out$time <- time_graph
-    # saveRDS(graph_out, paste0("outputs/graph_dir_", range_i))
-    # rm(graph_out)
 }
