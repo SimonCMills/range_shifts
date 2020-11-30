@@ -12,8 +12,7 @@ source("code/functions_igraph.R")
 range_names <- unique(gsub(".*60m_10kbuffer(.*)_2020.*", "\\1", fnames))
 
 # which graphs are already calculated? (avoid re-calculating)
-graphs_calculated <- list.files("Y:/edwards_lab1/User/bo1scm/range_shifts/outputs/", 
-                                "graph_undir") %>%
+graphs_calculated <- list.files("./outputs/", "graph_undir") %>%
     gsub("graph_undir_", "", .)
 
 # range metadata
