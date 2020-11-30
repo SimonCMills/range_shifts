@@ -2,7 +2,7 @@
 # running for northern Andes)
 
 ## Packages ----
-library(rgee)
+library(rgee); library(sf); library(dplyr)
 
 ## Set up rgee session ----
 ee_Initialize()
@@ -69,3 +69,21 @@ for (i in 1:length(featlist$features)) {
     # counter
     cat(paste0("\n", name_i))
 }
+
+# calculate proportion overlap with tropics, and save polygons
+mountains_sf <- ee_as_sf(mountains_sub)
+geom_sf <- ee_as_sf(geometry)
+
+summ <- mountains_sf %>% 
+    mutate(total_area = st_area(.)) %>%
+    st_intersection(., geom_sf) %>% 
+    mutate(intersect_area = st_area(.), 
+           prop_in_tropics = intersect_area/total_area)
+
+mountains_final <- summ %>% 
+    as_tibble() %>%
+    dplyr::select(Name, prop_in_tropics) %>%
+    mutate(prop_in_tropics = as.numeric(prop_in_tropics)) %>%
+    left_join(mountains_sf, .)
+
+saveRDS(mountains_final, "data/mountain_polygons.rds")
