@@ -21,8 +21,9 @@ graphs_calculated <- list.files("./outputs/", "graph_undir") %>%
 range_mtd <- readRDS("data/range_metadata.rds") %>% 
     dplyr::select(-geometry) %>%
     as_tibble %>%
-    filter(max_val >= 1500, prop_in_tropics >= .5, !(range %in% graphs_calculated))  %>%
-    arrange(desc(ncell))
+    filter(max_val >= 1500, prop_in_tropics >= .5, pct_forest_300 >= .1, 
+           !(range %in% graphs_calculated))  %>%
+    arrange(amt_forest)
 
 # loop across ranges and calculate graphs
 for (i in 1:length(range_mtd$range)) {
@@ -44,17 +45,16 @@ for (i in 1:length(range_mtd$range)) {
     # get permitted cells (adding 0-valued margin)
     permitted_tc <- as.matrix(tc_classified)
     permitted_tc[get_margins(permitted_tc)] <- 0
-    # permitted_cells <- which(permitted_tc[] == 1)
+    
     ele_vec <- as.numeric(as.matrix(ele))
     n_row <- dim(permitted_tc)[1]
     n_col <- dim(permitted_tc)[2]
     
-    # remove everything below 200m 
-    to_remove <- which(ele_vec < 200)
+    # remove everything below 300m 
+    to_remove <- which(ele_vec < 300)
     permitted_tc[to_remove] <- 0
     permitted_cells <- which(permitted_tc[] == 1)
     
-
     time_graph <- system.time(
         graph_out <- generate_graph_undir(ele_vec, permitted_cells, n_row, n_col, rule=1)
     )
