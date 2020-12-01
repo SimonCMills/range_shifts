@@ -1,24 +1,19 @@
 # Growing set of functions for modelling spread through a network (built on igraph)
 #
 # Currently: 
-# (1) generate_graph_dir: create directed graph that climate connectivity metrics
-# can be generated from
-# NOTE: this is a bit out of date following edits to the alternative (2) function
+# (1) generate_graph_undir: create undirected graph for simulating range movement
 #
-# (2) generate_graph_undir: create undirected graph for simulating range movement
-#
-# (3) get_range: from graph, get all accessible cells and append their elevations. 
+# (2) get_new_range: from graph, get all accessible cells and append their elevations. 
 # Will be used to estimate the #cells in range through time
 #
-# (4) get_max_ele:get the maximum elevation accessible from all cells
+# (3) get_fm_range: from graph, get all cells at different elevations, i.e. 
+# 'free-movement' version. 
 #
-# - a bunch of possibly redundant stuff. 
-#
-# (5) get_adjacent: get adjacencies under varying gap-crossing rules- currently
+# (4) get_adjacent: get adjacencies under varying gap-crossing rules- currently
 # written manually from 0-2 cell gap-crossing; possibly needs to be able to 
 # generate adjacencies for an arbitrarily large gap-crossing number. 
 # 
-# (6) get_margins: creates impassable border at edge of raster (to prevent 
+# (5) get_margins: creates impassable border at edge of raster (to prevent 
 # adjacencies wrapping around to other side of matrix)
 
 # prevent R from using e notation (bug in R/igraph): see bug_reprex for more info
@@ -28,76 +23,7 @@ options(scipen=99)
 # dependencies
 library(dplyr); library(data.table); library(igraph)
 
-# generate the graph of all cells (travelling up- or along-slope, i.e from smaller
-# values to larger) 
-generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
-  
-  # generate adjacencies
-  adj <- data.table(from = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
-                    to = get_adjacent(permitted_cells, n_row, n_col, rule))
-  # remove non-permitted adjacencies
-  dat <- adj[to %in% permitted_cells,] 
-
-  # get elevations for from and to vertices
-  dat[,c("from_ele", "to_ele") := list(ele_vec[from], ele_vec[to])]
-  
-  # remove redundant object (frees up several GB in the case of Santa Marta)
-  rm(adj)
-  
-  dat2 <- rbind(dat[from_ele > to_ele,],
-                dat[from_ele == to_ele,])
-  
-  # remove pathways that travel upwards or downwards by more than 200m within 
-  # 60m (i.e. a gradient of 75 degrees, i.e. a cliff)
-  dat2 <- dat2[abs(from_ele - to_ele) < 200,]
-  
-  # order to create necessary ordering for dfs: dfs algorithm will jump to 
-  # new roots in order of vertices: by giving edge df in order of elevation, 
-  # this ensures it will always start from the next highest unreached vertex
-  setorder(dat2, -from_ele, -to_ele)
-  
-  # this drops cells without *any* permitted adjacencies, but need to retain for
-  # for calculating occupied area (keep them in graph because it simplifies 
-  # process downstream). 
-  dropped_cells <- permitted_cells[!(permitted_cells %in% unique(dat2$from))]
-  
-  # generate graph from adjacencies
-  g <- graph_from_data_frame(dat2[,list(from, to)], directed = T)
-  
-  # remove redundant object (after graph is generated)
-  # Not sure exactly what the total saving is due to reference in data.table, but 
-  # adj is [216e+06, 2] and dat2 is [4, 201e+06], all cols integer-valued in the 
-  # case of Cordillera Central de Ecuador (large mountain range), corresponding 
-  # to an object size of 4GB for dat2. 
-  rm(dat2)
-  
-  # add dropped vertices (those without neighbours)
-  g <- g + vertices(dropped_cells)
-
-  # generate lookup table
-  # note: This won't ever matter for my use, but treating as an integer will mean 
-  # indexing tops out somewhere around 2e+09 (as 32-bit)
-  vertex_names <- names(V(g))
-  graph_vertices <- data.table(id_cell = as.integer(vertex_names[]), 
-                               id_vertex = 1:length(vertex_names)) 
-  graph_vertices[, ele := ele_vec[id_cell]]
-  graph_vertices[, isolated := FALSE]
-  graph_vertices[id_cell %in% dropped_cells, isolated := TRUE]
-  
-  # sanity check: this final dataframe containing the cells that are disconnected 
-  # from the graph *and* all the cells in the graph, should be equal to the total
-  # number of forested cells provided at the outset
-  if(nrow(graph_vertices) != length(permitted_cells)) stop("length mismatch")
-  
-  # return graph, data.table of vertices, and the two lists of ingoing and
-  # outgoing edges from duplicated cells (errors should be caught by the above
-  # check: but can visually check these lists after the event to confirm there
-  # aren't additional failure cases)
-  list(graph = g, 
-       df_vertices = graph_vertices)
-}
-
-# generate the graph of all cells accessible through forest
+# (1) generate the graph of all cells accessible through forest
 generate_graph_undir <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
   # generate adjacencies
   adj <- data.table(from = rep(permitted_cells, (rule*2 + 1)^2 - 1),
@@ -159,7 +85,7 @@ generate_graph_undir <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
 }
 
 
-# given the graph, associated lookup table with elevations, and a start range
+# (2) given the graph, associated lookup table with elevations, and a start range
 # calculate all accessible future cells (and append associated elevations)
 get_new_range <- function(graph_out, upr_limit, range_width, increment, n_steps) {
   # copy vertices
@@ -214,6 +140,7 @@ get_new_range <- function(graph_out, upr_limit, range_width, increment, n_steps)
   return(df_vertices[!is.na(t),])
 }
 
+# (3) range under 'free movement' (fm)
 get_fm_range <- function(graph_out, upr_limit, range_width, increment, n_steps) {
   # copy vertices
   df_vertices <- copy(graph_out$df_vertices)
@@ -234,40 +161,7 @@ get_fm_range <- function(graph_out, upr_limit, range_width, increment, n_steps) 
   return(df_vertices[!is.na(t),])
 }
 
-# get maximum elevation accessible from each cell
-get_max_ele <- function(graph_output) {
-  graph_vertices <- graph_output$df_vertices
-  # run dfs
-  # housekeeping: fix igraph behaviour to correctly store father vertices
-  igraph_options(add.vertex.names=F)
-  dfs_out <- dfs(graph_output$graph, root = 1, unreachable = T, neimode="out", dist=T, father=T)
-  
-  # add distances to df with original ordering
-  graph_vertices[,father := dfs_out$father]
-  # now generate ordering for doing the membership calculation
-  graph_vertices[as.numeric(dfs_out$order), ordering := 1:.N]
-  setorder(graph_vertices, ordering)
-  # get membership and get maximum accessible elevation under upslope movement
-  graph_vertices[,membership := cumsum(is.na(father))]
-  graph_vertices[,max_ele := max(ele), by="membership"]
-  
-  return(graph_vertices[])
-}
-
-# contagious spread: not called in main function, but isolates the mechanism for 
-# movement in a single time-slice 
-spread_igraph <- function(permitted_vec, start_cells, n_row, n_col, rule=1) {
-  # permitted_cells <- which(permitted_vec == 1)
-  dat <- data.frame(x1 = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
-                    x2 = get_adjacent(permitted_cells, n_row, n_col, rule)) %>%
-    filter(x2 %in% permitted_cells)
-  graph <- graph_from_data_frame(dat)
-  members <- components(graph)$membership %>%
-    data.frame(membership = ., id_cell = as.integer(names(.)))
-  members$id_cell[members$membership %in% members$membership[members$id_cell %in% start_cells]]
-}
-
-# for each cell, get all adjacent cells
+# (4) for each cell, get all adjacent cells
 # this is a bit unwieldy, but works and is fast
 get_adjacent <- function(cells, n_row, n_col, rule=1) {
   if (rule == 1) {
@@ -361,7 +255,7 @@ get_adjacent <- function(cells, n_row, n_col, rule=1) {
   }
 }
 
-# get matrix margins
+# (5) get matrix margins
 get_margins <- function(matrix) {
   dims <- dim(matrix)
   bottom_right <- prod(dims)
@@ -372,9 +266,124 @@ get_margins <- function(matrix) {
     seq(dims[1], bottom_right, dims[1])) # bottom row
 }
 
+# (6) contagious spread: not called in main function, but isolates the mechanism for 
+# movement in a single time-slice 
+spread_igraph <- function(permitted_vec, start_cells, n_row, n_col, rule=1) {
+  dat <- data.frame(x1 = rep(permitted_cells, (rule*2 + 1)^2 - 1), 
+                    x2 = get_adjacent(permitted_cells, n_row, n_col, rule)) %>%
+    filter(x2 %in% permitted_cells)
+  graph <- graph_from_data_frame(dat)
+  members <- components(graph)$membership %>%
+    data.frame(membership = ., id_cell = as.integer(names(.)))
+  members$id_cell[members$membership %in% members$membership[members$id_cell %in% start_cells]]
+}
+
 ## DEFUNCT ----
+# functions that are not used in MS: all relate to calculating climate 
+# connectivity metrics. IMO, these metrics- prescribing unidirectional
+# movement along thermal gradient- are not useful. What species can only travel
+# to colder cells? In any given community, the majority of species are not at 
+# their upper thermal limit, and therefore most will have some capacity to move
+# to cooler future cells via warmer intermediaries. Matters made worse by 
+# published versions don't consider all pathways, but instead consider just the 
+# coldest-coldest-etc. pathway, ignoring anything that isn't the coldest of 
+# available options, so don't even guarantee finding the globally coldest
+# accessible cell. This code will consider all pathways, but still isn't useful. 
+# NOTE: Remove these functions at some point?
+
+# generate the graph of all cells (travelling up- or along-slope, i.e from smaller
+# values to larger)
+generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
+
+  # generate adjacencies
+  adj <- data.table(from = rep(permitted_cells, (rule*2 + 1)^2 - 1),
+                    to = get_adjacent(permitted_cells, n_row, n_col, rule))
+  # remove non-permitted adjacencies
+  dat <- adj[to %in% permitted_cells,]
+
+  # get elevations for from and to vertices
+  dat[,c("from_ele", "to_ele") := list(ele_vec[from], ele_vec[to])]
+
+  # remove redundant object (frees up several GB in the case of Santa Marta)
+  rm(adj)
+
+  dat2 <- rbind(dat[from_ele > to_ele,],
+                dat[from_ele == to_ele,])
+
+  # remove pathways that travel upwards or downwards by more than 200m within
+  # 60m (i.e. a gradient of 75 degrees, i.e. a cliff)
+  dat2 <- dat2[abs(from_ele - to_ele) < 200,]
+
+  # order to create necessary ordering for dfs: dfs algorithm will jump to
+  # new roots in order of vertices: by giving edge df in order of elevation,
+  # this ensures it will always start from the next highest unreached vertex
+  setorder(dat2, -from_ele, -to_ele)
+
+  # this drops cells without *any* permitted adjacencies, but need to retain for
+  # for calculating occupied area (keep them in graph because it simplifies
+  # process downstream).
+  dropped_cells <- permitted_cells[!(permitted_cells %in% unique(dat2$from))]
+
+  # generate graph from adjacencies
+  g <- graph_from_data_frame(dat2[,list(from, to)], directed = T)
+
+  # remove redundant object (after graph is generated)
+  # Not sure exactly what the total saving is due to reference in data.table, but
+  # adj is [216e+06, 2] and dat2 is [4, 201e+06], all cols integer-valued in the
+  # case of Cordillera Central de Ecuador (large mountain range), corresponding
+  # to an object size of 4GB for dat2.
+  rm(dat2)
+
+  # add dropped vertices (those without neighbours)
+  g <- g + vertices(dropped_cells)
+
+  # generate lookup table
+  # note: This won't ever matter for my use, but treating as an integer will mean
+  # indexing tops out somewhere around 2e+09 (as 32-bit)
+  vertex_names <- names(V(g))
+  graph_vertices <- data.table(id_cell = as.integer(vertex_names[]),
+                               id_vertex = 1:length(vertex_names))
+  graph_vertices[, ele := ele_vec[id_cell]]
+  graph_vertices[, isolated := FALSE]
+  graph_vertices[id_cell %in% dropped_cells, isolated := TRUE]
+
+  # sanity check: this final dataframe containing the cells that are disconnected
+  # from the graph *and* all the cells in the graph, should be equal to the total
+  # number of forested cells provided at the outset
+  if(nrow(graph_vertices) != length(permitted_cells)) stop("length mismatch")
+
+  # return graph, data.table of vertices, and the two lists of ingoing and
+  # outgoing edges from duplicated cells (errors should be caught by the above
+  # check: but can visually check these lists after the event to confirm there
+  # aren't additional failure cases)
+  list(graph = g,
+       df_vertices = graph_vertices)
+}
+
+
+# get maximum elevation accessible from each cell
+get_max_ele <- function(graph_output) {
+  graph_vertices <- graph_output$df_vertices
+  # run dfs
+  # housekeeping: fix igraph behaviour to correctly store father vertices
+  igraph_options(add.vertex.names=F)
+  dfs_out <- dfs(graph_output$graph, root = 1, unreachable = T, neimode="out", dist=T, father=T)
+  
+  # add distances to df with original ordering
+  graph_vertices[,father := dfs_out$father]
+  # now generate ordering for doing the membership calculation
+  graph_vertices[as.numeric(dfs_out$order), ordering := 1:.N]
+  setorder(graph_vertices, ordering)
+  # get membership and get maximum accessible elevation under upslope movement
+  graph_vertices[,membership := cumsum(is.na(father))]
+  graph_vertices[,max_ele := max(ele), by="membership"]
+  
+  return(graph_vertices[])
+}
+#
 # old version of generate_graph that contains workaround for igraph/R e-notation 
-# issue, prior to simpler solution with the options(scipen=99)
+# issue- identify duplicated vertices, reroute, and then remove dupes. The simpler 
+# scipen solution is much better.
 #
 # generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
 #   
