@@ -21,9 +21,10 @@ ele_gain <- round(2/lapse_rate, 0)
 n_steps <- 20
 increment <- ele_gain/n_steps
 
-for(i in ids) {
+for(i in 1:length(range_names)) {
     # read in the ith graph
     graph_i <- readRDS(fnames[i])
+    print(range_names[i])
     # get highest forested elevation
     max_ele <- max(graph_i$df_vertices$ele)
     # each species' starting upper limit
@@ -31,6 +32,7 @@ for(i in ids) {
     
     # iterate across starting ranges
     for(j in 1:length(upr_vec)) {
+        print(paste0("species: ", j))
         # get range accessed through movement, and range that is movement free
         new_range <- get_new_range(graph_i, upr_limit = upr_vec[j], range_width = rwidth, increment, n_steps)
         fm_range <- get_fm_range(graph_i, upr_limit = upr_vec[j], range_width = rwidth, increment, n_steps)
