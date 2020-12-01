@@ -1,21 +1,24 @@
 # read graphs and calculate range change
+
+# housekeeping
 library(data.table); library(igraph); library(raster)
 source("code/functions_igraph.R")
 
+# pass in range width
 cpu_info <- as.numeric(commandArgs(T))
-print(cpu_info)
-id_number <- cpu_info[1]
+rwidth <- cpu_info[1]
 
-if(id_number == 1) ids <- 1:4
-if(id_number == 2) ids <- 5:8
-if(id_number == 3) ids <- 9:12
-if(id_number == 4) ids <- 13:16
+# get fnames (and order by file size- so smallest are run first)
 fnames <- list.files("outputs/", full.names = T, pattern="graph_undir")
+fnames <- fnames[order(file.info(fnames)$size)]
+
+# get range names
 range_names <- unique(gsub(".*_undir_(.*)", "\\1", fnames))
 
 # get highest forested elevation
-ele_gain <- 365
-n_steps <- 10
+lapse_rate <- 0.0055 # per metre
+ele_gain <- round(2/lapse_rate, 0)
+n_steps <- 20
 increment <- ele_gain/n_steps
 
 for(i in ids) {
@@ -23,16 +26,17 @@ for(i in ids) {
     graph_i <- readRDS(fnames[i])
     # get highest forested elevation
     max_ele <- max(graph_i$df_vertices$ele)
+    # each species' starting upper limit
     upr_vec <- seq(1100, max_ele - ele_gain, len=20)
     
     # iterate across starting ranges
     for(j in 1:length(upr_vec)) {
         # get range accessed through movement, and range that is movement free
-        new_range <- get_new_range(graph_i, upr_limit = upr_vec[j], range_width = 800, increment, n_steps)
-        fm_range <- get_fm_range(graph_i, upr_limit = upr_vec[j], range_width = 800, increment, n_steps)
+        new_range <- get_new_range(graph_i, upr_limit = upr_vec[j], range_width = rwidth, increment, n_steps)
+        fm_range <- get_fm_range(graph_i, upr_limit = upr_vec[j], range_width = rwidth, increment, n_steps)
         
         # save
-        save_name <- paste0("outputs/rangeshifts/", range_names[i], "_upr", upr_vec[j], "_rw800.rds")
+        save_name <- paste0("outputs/rangeshifts/", range_names[i], "_upr", upr_vec[j], "_rw", rwidth,".rds")
         saveRDS(list(range_move = new_range, range_fm = fm_range), save_name)
         
         # summarise range changes
@@ -57,11 +61,11 @@ for(i in ids) {
                                           by=c("abs_t", "t0"), 
                                           suffix=c("_move", "_fm")) %>%
             mutate(upr = upr_vec[j], 
-                   range_width = 800, 
+                   range_width = rwidth, 
                    range = range_names[i])
         
         save_name <- paste0("outputs/rangeshift_summaries/", range_names[i], "_upr", 
-                            upr_vec[j], "_rw800.rds")
+                            upr_vec[j], "_rw", rwidth, ".rds")
         
         saveRDS(range_change_summary, save_name)
     }    
