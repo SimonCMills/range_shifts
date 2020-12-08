@@ -21,9 +21,11 @@ graphs_calculated <- list.files("./outputs/", "graph_undir") %>%
 range_mtd <- readRDS("data/range_metadata.rds") %>% 
     dplyr::select(-geometry) %>%
     as_tibble %>%
-    filter(max_val >= 1500, prop_in_tropics >= .5, pct_forest_300 >= .1, 
+    filter(max_val >= 1500, prop_in_tropics >= .5, pct_forest_300 >= .05, 
            !(range %in% graphs_calculated))  %>%
-    arrange(amt_forest)
+    arrange(area_forest)
+
+print(paste0("number to calculate: ", nrow(range_mtd)))
 
 # loop across ranges and calculate graphs
 for (i in 1:length(range_mtd$range)) {
