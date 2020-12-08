@@ -92,23 +92,29 @@ get_new_range <- function(graph_out, upr_limit, range_width, increment, n_steps)
   df_vertices <- copy(graph_out$df_vertices)
   # identify cells in range at t==0
   df_vertices[ele >= upr_limit - range_width  & ele < upr_limit, t := 0] 
-
+  
   # initialise start cells at t == 0 (only searching upper perimeter)
   start_cells <- df_vertices[t == 0 & ele >= upr_limit - 200, id_cell]
-
+  
   # No cell is more than 200m asl different from neighbour (by design: >200m
   # adjacencies are removed). Logically therefore, only need to search within
   # 200m of the upper edge. Either a cell is within 200m of an edge and therefore
   # will be able to move up if a pathway exists once the boundary is relaxed, or
   # it is more than 200m from the elevational limit, in which case movement is not
   # allowed anyway
-  for(i in 1:n_steps) {
+  for(i in 1:20) {
+    # catch case where there are no start vertices
     # first trim to available subgraph in timestep i
     # note: lower range never exceeds the upper limit of the range at t == 0,
     # which are already stored at the outset. Can therefore set the lower bound
     # as a static x["upr"] - 200
     retain_vertices <- df_vertices[ele >= upr_limit - 200 + increment*(i-1) &
                                      ele < upr_limit + increment*i, id_vertex]
+    
+    # catch case where there are no start vertices that can access new cells 
+    # note: there might still be a start cell, but it isn't within 200 m of an 
+    # upper elevational limit, and by definition therefore can't access new cells. 
+    if(length(retain_vertices) != 0) {
     subgraph_i <- induced_subgraph(graph_out$graph, retain_vertices)
 
     # generate new lookup table
@@ -122,6 +128,9 @@ get_new_range <- function(graph_out, upr_limit, range_width, increment, n_steps)
 
     # get cells that are reached by algo (this includes start cells)
     reached_cells <- subgraph_vertices[id_vertex %in% as.integer(bfs_i$order), id_cell]
+    } else {
+      reached_cells <- 0
+    }
 
     # update range info: all cells that are not in the start cells AND
     # are in the reached cells get the t-column updated (i.e. reached at time t)
@@ -131,7 +140,7 @@ get_new_range <- function(graph_out, upr_limit, range_width, increment, n_steps)
     # note: reached_cells include both start_cells and new cells (as algorithm
     # will expand downwards, and by definition is linked to all start cells)
     start_cells <- subgraph_vertices[id_cell %in% reached_cells, id_cell]
-
+    
     # record cells that have dropped out of range
     df_vertices[t == 0 & ele < upr_limit - range_width  + increment*i, t := -i]
   }
