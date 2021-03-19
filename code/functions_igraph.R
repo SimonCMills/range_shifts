@@ -289,21 +289,16 @@ spread_igraph <- function(permitted_vec, start_cells, n_row, n_col, rule=1) {
 
 ## DEFUNCT ----
 # functions that are not used in MS: all relate to calculating climate 
-# connectivity metrics. IMO, these metrics- prescribing unidirectional
-# movement along thermal gradient- are not useful. What species can only travel
-# to colder cells? In any given community, the majority of species are not at 
-# their upper thermal limit, and therefore most will have some capacity to move
-# to cooler future cells via warmer intermediaries. Matters made worse by 
-# published versions don't consider all pathways, but instead consider just the 
-# coldest-coldest-etc. pathway, ignoring anything that isn't the coldest of 
-# available options, so don't even guarantee finding the globally coldest
-# accessible cell. This code will consider all pathways, but still isn't useful. 
-# NOTE: Remove these functions at some point?
+# connectivity metrics. In comparison to published versions, this will consider
+# *all* pathways by which a colder cell can be reached by only moving in a single
+# direction along a gradient.
 
 # generate the graph of all cells (travelling up- or along-slope, i.e from smaller
 # values to larger)
 generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
-
+  
+  # prevent R from using e notation (bug in R/igraph): see bug_reprex for more info
+  options(scipen=99)
   # generate adjacencies
   adj <- data.table(from = rep(permitted_cells, (rule*2 + 1)^2 - 1),
                     to = get_adjacent(permitted_cells, n_row, n_col, rule))
@@ -369,7 +364,6 @@ generate_graph <- function(ele_vec, permitted_cells, n_row, n_col, rule) {
        df_vertices = graph_vertices)
 }
 
-
 # get maximum elevation accessible from each cell
 get_max_ele <- function(graph_output) {
   graph_vertices <- graph_output$df_vertices
@@ -389,7 +383,8 @@ get_max_ele <- function(graph_output) {
   
   return(graph_vertices[])
 }
-#
+
+
 # old version of generate_graph that contains workaround for igraph/R e-notation 
 # issue- identify duplicated vertices, reroute, and then remove dupes. The simpler 
 # scipen solution is much better.
